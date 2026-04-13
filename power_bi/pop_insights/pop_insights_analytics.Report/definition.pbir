@@ -1,9 +1,0 @@
-{
-  "version": "4.0",
-  "datasetReference": {
-    "byPath": {
-      "path": "../pop_insights_analytics.SemanticModel"
-    },
-    "byConnection": null
-  }
-}
