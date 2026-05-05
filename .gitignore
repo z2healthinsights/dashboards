@@ -10,3 +10,4 @@ __pycache__/
 .playwright-mcp/
 cu-*.png
 cd-*.png
+qm-*.png
