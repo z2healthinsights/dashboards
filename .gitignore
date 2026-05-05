@@ -1,1 +1,11 @@
 .DS_Store
+
+# Python (see python_dash/.gitignore for scoped ignores)
+python_dash/.venv/
+python_dash/.env
+__pycache__/
+*.py[cod]
+
+# Local testing artifacts
+.playwright-mcp/
+cu-*.png
