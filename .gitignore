@@ -9,3 +9,4 @@ __pycache__/
 # Local testing artifacts
 .playwright-mcp/
 cu-*.png
+cd-*.png
