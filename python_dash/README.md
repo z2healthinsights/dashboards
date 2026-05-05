@@ -16,21 +16,21 @@ python_dash/
 │   ├── theme.py               # shared Dash theme + Plotly template
 │   └── components.py          # KPI cards, page-shell helpers
 └── dashboards/
-    ├── dqi_analytics/         # data-quality dashboard (fully implemented)
-    ├── risk_adjust_benchmark/ # benchmarks dashboard (fully implemented)
-    ├── cost_and_utilization/  # scaffold
-    ├── cost_drivers/          # scaffold
-    ├── mssp_aco_dashboard/    # scaffold
-    ├── population_health/     # scaffold
-    ├── quality_measures/      # scaffold
-    └── semantic_layer/        # scaffold (model browser)
+    ├── dqi_analytics/         # Data Quality Index
+    ├── risk_adjust_benchmark/ # Risk-Adjusted Benchmarks
+    ├── cost_and_utilization/  # Cost & Utilization (7 PBI pages)
+    ├── cost_drivers/          # Cost Drivers (chronic-condition cohort filter)
+    ├── mssp_aco_dashboard/    # MSSP ACO Performance (practice/provider/patient drill-down)
+    ├── population_health/     # Population Health (6 PBI pages)
+    ├── quality_measures/      # Quality Measures (clinical + AHRQ PQI)
+    └── semantic_layer/        # Semantic Layer model browser
 ```
 
-The two fully implemented dashboards correspond to the `.pbip` Power BI files
-whose semantic models are checked in as text — their measures and table
-references were portable. The scaffolded six are runnable but display
-placeholder visuals; they correspond to `.pbit` templates whose live datasets
-sit in the Power BI service.
+All eight dashboards are implemented end-to-end against the standard
+Tuva schemas (`semantic_layer.*`, `data_quality.*`, `quality_measures.*`,
+`ahrq_measures.*`). They render against any Tuva install, with graceful
+"data not loaded" alerts on tabs whose source tables are empty (e.g.
+`fact_risk_*` in synthetic builds, `benchmarks.*` which ships separately).
 
 ## Setup
 
