@@ -18,6 +18,7 @@ import plotly.graph_objects as go
 from dash import Input, Output, callback, dash_table, dcc, html
 
 from tuva_dash.components import kpi_card, kpi_row, no_data_message, page_shell
+from tuva_dash.lazy import LazyFrame
 
 from . import queries
 
@@ -25,13 +26,13 @@ from . import queries
 # defaulting to 80%. Adjust by editing here or via a future parameter.
 QUALITY_TARGET = 0.80
 
-_CLINICAL = queries.load_clinical_long()
-_CLINICAL_WIDE = queries.load_clinical_wide()
-_AHRQ_RATE = queries.load_ahrq_rate()
-_AHRQ_DENOM = queries.load_ahrq_denom_long()
-_AHRQ_NUM = queries.load_ahrq_num_long()
-_MEMBERS = queries.load_dim_member()
-_MEMBER_MONTHS = queries.load_dim_member_months()
+_CLINICAL = LazyFrame(queries.load_clinical_long)
+_CLINICAL_WIDE = LazyFrame(queries.load_clinical_wide)
+_AHRQ_RATE = LazyFrame(queries.load_ahrq_rate)
+_AHRQ_DENOM = LazyFrame(queries.load_ahrq_denom_long)
+_AHRQ_NUM = LazyFrame(queries.load_ahrq_num_long)
+_MEMBERS = LazyFrame(queries.load_dim_member)
+_MEMBER_MONTHS = LazyFrame(queries.load_dim_member_months)
 
 
 # -- helpers ------------------------------------------------------------------

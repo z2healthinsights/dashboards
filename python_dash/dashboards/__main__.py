@@ -127,7 +127,17 @@ app.layout = html.Div(
     [
         dcc.Location(id="tuva-shell-url", refresh=False),
         html.Div(id="tuva-shell-navbar"),
-        html.Div(id="tuva-shell-content", className="tuva-page-content"),
+        dcc.Loading(
+            html.Div(id="tuva-shell-content", className="tuva-page-content"),
+            custom_spinner=html.Div(
+                [
+                    html.Div(className="tuva-loading-spinner"),
+                    html.Div("Loading dashboard data...", className="tuva-loading-text"),
+                ],
+                className="tuva-loading",
+            ),
+            delay_show=300,
+        ),
     ]
 )
 

@@ -24,6 +24,11 @@ class WarehouseDriverMissing(RuntimeError):
     """Raised when the chosen warehouse type's driver isn't installed."""
 
 
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df.columns = [str(c).lower() for c in df.columns]
+    return df
+
+
 def run_query(
     sql: str,
     columns: Sequence[str] | None = None,
@@ -42,15 +47,15 @@ def run_query(
 
     wh = settings.data_warehouse_type
     if wh == "duckdb":
-        return _run_duckdb(sql, settings)
+        return _normalize_columns(_run_duckdb(sql, settings))
     if wh == "snowflake":
-        return _run_snowflake(sql, settings)
+        return _normalize_columns(_run_snowflake(sql, settings))
     if wh == "bigquery":
-        return _run_bigquery(sql, settings)
+        return _normalize_columns(_run_bigquery(sql, settings))
     if wh == "redshift":
-        return _run_redshift(sql, settings)
+        return _normalize_columns(_run_redshift(sql, settings))
     if wh in {"odbc", "sqlserver", "fabric"}:
-        return _run_odbc(sql, settings)
+        return _normalize_columns(_run_odbc(sql, settings))
     raise ValueError(f"Unsupported DATA_WAREHOUSE_TYPE: {wh!r}")
 
 

@@ -90,6 +90,10 @@ python -m dashboards
 Defaults to http://127.0.0.1:8050 — a home page lists every dashboard,
 the navbar lets you jump between them, and each route has a deep link:
 
+The Dash apps can display member-level healthcare data. Keep `DASH_HOST` set
+to `127.0.0.1` and `DASH_DEBUG=false` unless the app is behind your normal
+authentication and network controls.
+
 | Route | Dashboard |
 | --- | --- |
 | `/` | Home (catalog of dashboards) |

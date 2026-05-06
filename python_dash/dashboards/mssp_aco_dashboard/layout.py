@@ -12,18 +12,20 @@ import plotly.express as px
 from dash import Input, Output, callback, dash_table, dcc, html
 
 from tuva_dash.components import kpi_card, kpi_row, no_data_message, page_shell
+from tuva_dash.lazy import LazyFrame
 
 from . import queries
 
-# Module-level cache.
-_MM = queries.load_member_months()
-_DIM_MM = queries.load_dim_member_months()
-_MEMBERS = queries.load_members()
-_CONDITIONS = queries.load_member_conditions()
-_HCC_GAPS = queries.load_hcc_gaps()
-_ENCOUNTERS = queries.load_encounters()
-_PQI_RATE = queries.load_pqi_rate()
-_PQI_DENOM = queries.load_pqi_denom()
+# Lazy module-level cache. Importing this module registers callbacks without
+# pulling every MSSP table from Snowflake during app startup.
+_MM = LazyFrame(queries.load_member_months)
+_DIM_MM = LazyFrame(queries.load_dim_member_months)
+_MEMBERS = LazyFrame(queries.load_members)
+_CONDITIONS = LazyFrame(queries.load_member_conditions)
+_HCC_GAPS = LazyFrame(queries.load_hcc_gaps)
+_ENCOUNTERS = LazyFrame(queries.load_encounters)
+_PQI_RATE = LazyFrame(queries.load_pqi_rate)
+_PQI_DENOM = LazyFrame(queries.load_pqi_denom)
 
 QUALITY_TARGET = 0.80
 

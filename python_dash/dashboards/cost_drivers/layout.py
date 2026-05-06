@@ -14,17 +14,18 @@ import pandas as pd
 from dash import Input, Output, callback, dash_table, dcc, html
 
 from tuva_dash.components import kpi_card, kpi_row, no_data_message, page_shell
+from tuva_dash.lazy import LazyFrame
 
 from . import queries
 
-# Module-level dataset cache. The Dash callback rebuilds visuals from these
-# in-memory frames as the user changes filters — for repos this small
-# (thousands of rows) it's faster than re-querying DuckDB on every change.
-_MM = queries.load_member_months()
-_ENCOUNTERS = queries.load_encounters()
-_CLAIMS = queries.load_claims()
-_MEMBER_CONDITIONS = queries.load_member_conditions()
-_ADMISSIONS = queries.load_admissions()
+# Lazy dataset cache. The Dash callback rebuilds visuals from these in-memory
+# frames as the user changes filters, but Snowflake is not queried until this
+# dashboard is visited.
+_MM = LazyFrame(queries.load_member_months)
+_ENCOUNTERS = LazyFrame(queries.load_encounters)
+_CLAIMS = LazyFrame(queries.load_claims)
+_MEMBER_CONDITIONS = LazyFrame(queries.load_member_conditions)
+_ADMISSIONS = LazyFrame(queries.load_admissions)
 
 
 def _money(v: float) -> str:

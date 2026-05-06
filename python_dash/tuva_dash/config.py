@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -12,6 +13,8 @@ from dotenv import load_dotenv
 # Load .env from the python_dash/ root so every dashboard sees the same config.
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / ".env")
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 
 
 def _get(key: str, default: str = "") -> str:
@@ -83,11 +86,44 @@ class Settings:
     dash_port: int
     dash_debug: bool
 
+    def _identifier(self, value: str, label: str) -> str:
+        """Return a validated SQL identifier.
+
+        These values come from environment/config settings and are interpolated
+        as object names, not SQL values, so DB-API bind parameters are not a
+        portable option across all supported warehouses.
+        """
+        if not value or not _IDENTIFIER_RE.fullmatch(value):
+            raise ValueError(f"Invalid {label}: {value!r}")
+        return value
+
+    def _quote_identifier(self, value: str) -> str:
+        ident = self._identifier(value, "SQL identifier")
+        wh = self.data_warehouse_type
+        if wh == "snowflake":
+            return f'"{ident.upper()}"'
+        if wh == "bigquery":
+            return f"`{ident}`"
+        if wh in {"odbc", "sqlserver", "fabric"}:
+            return f"[{ident}]"
+        return f'"{ident}"'
+
+    def sql_literal(self, value: str) -> str:
+        """Return a single-quoted SQL literal for validated metadata filters."""
+        return "'" + value.replace("'", "''") + "'"
+
     def schema(self, tuva_schema: str) -> str:
         """Apply the schema prefix the same way the M code does."""
         if self.schema_prepend and self.schema_prepend.upper() != "NULL":
-            return f"{self.schema_prepend}{tuva_schema}"
-        return tuva_schema
+            return self._identifier(f"{self.schema_prepend}{tuva_schema}", "schema")
+        return self._identifier(tuva_schema, "schema")
+
+    def metadata_schema(self, tuva_schema: str) -> str:
+        """Return schema name as it appears in warehouse metadata tables."""
+        schema = self.schema(tuva_schema)
+        if self.data_warehouse_type == "snowflake":
+            return schema.upper()
+        return schema
 
     def qualified(self, tuva_schema: str, table: str) -> str:
         """Return a fully qualified table reference for the active warehouse.
@@ -95,11 +131,13 @@ class Settings:
         DuckDB is queried as `schema.table` because the database is the file
         itself; everything else uses `database.schema.table`.
         """
-        schema = self.schema(tuva_schema)
+        schema = self._quote_identifier(self.schema(tuva_schema))
+        table_name = self._quote_identifier(table)
         if self.data_warehouse_type == "duckdb":
-            return f"{schema}.{table}"
+            return f"{schema}.{table_name}"
         db = self.database_name or self.snowflake_database
-        return f"{db}.{schema}.{table}"
+        db = self._quote_identifier(db)
+        return f"{db}.{schema}.{table_name}"
 
 
 @lru_cache(maxsize=1)
@@ -117,7 +155,7 @@ def get_settings() -> Settings:
         snowflake_password=_get("SNOWFLAKE_PASSWORD"),
         snowflake_warehouse=_get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
         snowflake_database=_get("SNOWFLAKE_DATABASE"),
-        snowflake_role=_get("SNOWFLAKE_ROLE", "ACCOUNTADMIN"),
+        snowflake_role=_get("SNOWFLAKE_ROLE"),
         snowflake_authenticator=_get("SNOWFLAKE_AUTHENTICATOR"),
         google_application_credentials=_get("GOOGLE_APPLICATION_CREDENTIALS"),
         bigquery_project=_get("BIGQUERY_PROJECT"),
@@ -131,5 +169,5 @@ def get_settings() -> Settings:
         row_limit=_get_int("ROW_LIMIT"),
         dash_host=_get("DASH_HOST", "127.0.0.1"),
         dash_port=_get_int("DASH_PORT", 8050) or 8050,
-        dash_debug=_get_bool("DASH_DEBUG", True),
+        dash_debug=_get_bool("DASH_DEBUG", False),
     )

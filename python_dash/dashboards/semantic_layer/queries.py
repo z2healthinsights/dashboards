@@ -32,11 +32,11 @@ def _safe(sql: str, columns: list[str]) -> pd.DataFrame:
 def load_tables() -> pd.DataFrame:
     """One row per table in the semantic_layer schema."""
     s = get_settings()
-    schema = s.schema(SCHEMA)
+    schema = s.metadata_schema(SCHEMA)
     sql = f"""
-        SELECT table_name
+        SELECT LOWER(table_name) AS table_name
         FROM information_schema.tables
-        WHERE table_schema = '{schema}'
+        WHERE table_schema = {s.sql_literal(schema)}
         ORDER BY table_name
     """
     df = _safe(sql, ["table_name"])
@@ -74,11 +74,15 @@ def load_tables() -> pd.DataFrame:
 def load_columns() -> pd.DataFrame:
     """All columns across the semantic_layer schema."""
     s = get_settings()
-    schema = s.schema(SCHEMA)
+    schema = s.metadata_schema(SCHEMA)
     sql = f"""
-        SELECT table_name, column_name, data_type, ordinal_position
+        SELECT
+            LOWER(table_name) AS table_name,
+            LOWER(column_name) AS column_name,
+            data_type,
+            ordinal_position
         FROM information_schema.columns
-        WHERE table_schema = '{schema}'
+        WHERE table_schema = {s.sql_literal(schema)}
         ORDER BY table_name, ordinal_position
     """
     return _safe(sql, ["table_name", "column_name", "data_type", "ordinal_position"])

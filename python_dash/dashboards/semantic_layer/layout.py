@@ -17,12 +17,14 @@ import plotly.graph_objects as go
 from dash import Input, Output, callback, dash_table, dcc, html
 
 from tuva_dash.components import kpi_card, kpi_row, no_data_message, page_shell
+from tuva_dash.lazy import LazyFrame
 
 from . import queries
 
-# Module-level cache.
-_TABLES = queries.load_tables()
-_COLUMNS = queries.load_columns()
+# Lazy module-level cache. The model browser only queries information_schema
+# when the Semantic Layer page is visited.
+_TABLES = LazyFrame(queries.load_tables)
+_COLUMNS = LazyFrame(queries.load_columns)
 
 
 # -- relationship graph ------------------------------------------------------

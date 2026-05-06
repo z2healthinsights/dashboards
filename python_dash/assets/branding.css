@@ -87,3 +87,34 @@ body {
 .tuva-page-content {
   padding: 1.25rem 1.5rem 2rem 1.5rem;
 }
+
+.tuva-loading {
+  align-items: center;
+  color: var(--tuva-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  justify-content: center;
+  min-height: 260px;
+  width: 100%;
+}
+
+.tuva-loading-spinner {
+  animation: tuva-spin .85s linear infinite;
+  border: 4px solid var(--tuva-border);
+  border-top-color: var(--tuva-blue);
+  border-radius: 50%;
+  height: 42px;
+  width: 42px;
+}
+
+.tuva-loading-text {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@keyframes tuva-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

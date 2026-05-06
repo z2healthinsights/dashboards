@@ -12,21 +12,23 @@ import plotly.express as px
 from dash import dash_table, dcc, html
 
 from tuva_dash.components import kpi_card, kpi_row, no_data_message, page_shell
+from tuva_dash.lazy import LazyFrame
 
 from . import queries
 
-# Module-level dataset cache.
-_MM = queries.load_member_months()
-_MEMBERS = queries.load_members()
-_CONDITIONS = queries.load_member_conditions()
-_ENCOUNTERS = queries.load_encounters()
-_ADMISSIONS = queries.load_admissions()
-_ED_VISITS = queries.load_ed_visits()
-_PHARMACY = queries.load_pharmacy()
-_RISK_SCORES = queries.load_risk_scores()
-_RISK_FACTORS = queries.load_risk_factors()
-_PQI_DENOM = queries.load_pqi_denom()
-_PQI_RATE = queries.load_pqi_rate()
+# Lazy module-level dataset cache. Data is queried once, on first use, instead
+# of at app startup.
+_MM = LazyFrame(queries.load_member_months)
+_MEMBERS = LazyFrame(queries.load_members)
+_CONDITIONS = LazyFrame(queries.load_member_conditions)
+_ENCOUNTERS = LazyFrame(queries.load_encounters)
+_ADMISSIONS = LazyFrame(queries.load_admissions)
+_ED_VISITS = LazyFrame(queries.load_ed_visits)
+_PHARMACY = LazyFrame(queries.load_pharmacy)
+_RISK_SCORES = LazyFrame(queries.load_risk_scores)
+_RISK_FACTORS = LazyFrame(queries.load_risk_factors)
+_PQI_DENOM = LazyFrame(queries.load_pqi_denom)
+_PQI_RATE = LazyFrame(queries.load_pqi_rate)
 
 
 # -- formatting helpers ------------------------------------------------------
