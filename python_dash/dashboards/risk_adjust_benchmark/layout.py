@@ -7,9 +7,36 @@ import pandas as pd
 import plotly.express as px
 from dash import dash_table, dcc, html
 
-from tuva_dash.components import kpi_card, kpi_row, no_data_message, page_shell
+from tuva_dash.components import kpi_card, kpi_row, page_shell
+from tuva_dash.config import get_settings
 
 from . import queries
+
+
+def _empty_message() -> dbc.Alert:
+    """Context-aware alert.
+
+    With LOAD_DATA=false the generic message tells the user how to enable
+    queries. With LOAD_DATA=true an empty frame here can only mean the
+    `benchmarks.*` tables aren't in the warehouse — that schema is
+    published separately by Tuva and isn't part of the standard dbt
+    build, so we surface that specifically rather than blaming LOAD_DATA.
+    """
+    if not get_settings().load_data:
+        return _empty_message()
+    return dbc.Alert(
+        [
+            html.Strong("Benchmarks schema not loaded. "),
+            "This dashboard reads ",
+            html.Code("benchmarks.predict_member_month"),
+            " and ",
+            html.Code("benchmarks.predict_inpatient"),
+            ", which Tuva publishes separately from the open-source dbt "
+            "package. Load the benchmarks dataset into your warehouse to "
+            "populate this view.",
+        ],
+        color="info",
+    )
 
 
 def _fmt_money(v: float) -> str:
@@ -48,7 +75,7 @@ def _pmpm_kpis(mm: pd.DataFrame) -> dbc.Row:
 
 def _pmpm_trend(mm: pd.DataFrame):
     if mm.empty:
-        return no_data_message()
+        return _empty_message()
     df = mm.copy()
     df["year_month"] = pd.to_datetime(df["year_month"], errors="coerce")
     by_month = (
@@ -67,7 +94,7 @@ def _pmpm_trend(mm: pd.DataFrame):
 
 def _pmpm_by_service(mm: pd.DataFrame):
     if mm.empty or "service_category_1" not in mm.columns:
-        return no_data_message()
+        return _empty_message()
     by_svc = (
         mm.groupby("service_category_1")[["actual_pmpm", "expected_pmpm"]]
         .mean()
@@ -106,7 +133,7 @@ def _inpatient_kpis(ip: pd.DataFrame) -> dbc.Row:
 
 def _readmission_trend(ip: pd.DataFrame):
     if ip.empty or "discharge_date" not in ip.columns:
-        return no_data_message()
+        return _empty_message()
     df = ip.copy()
     df["discharge_date"] = pd.to_datetime(df["discharge_date"], errors="coerce")
     df["year_month"] = df["discharge_date"].dt.to_period("M").dt.to_timestamp()
@@ -128,7 +155,7 @@ def _readmission_trend(ip: pd.DataFrame):
 
 def _inpatient_table(ip: pd.DataFrame):
     if ip.empty:
-        return no_data_message()
+        return _empty_message()
     return dash_table.DataTable(
         data=ip.head(500).to_dict("records"),
         columns=[{"name": c, "id": c} for c in ip.columns],
