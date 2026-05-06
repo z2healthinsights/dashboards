@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import dash
 import dash_bootstrap_components as dbc
 import plotly.io as pio
 
 from tuva_dash.config import get_settings
+
+# Project-level assets folder (python_dash/assets) — holds the Tuva logo
+# and branding.css. Computed relative to this file so it works whether
+# the app runs from python_dash/ or from a venv elsewhere.
+_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 # A muted Tuva-style palette. Override per-app by editing fig.update_layout.
 TUVA_TEMPLATE = "simple_white"
@@ -24,6 +31,7 @@ def make_app(title: str, suppress_callback_exceptions: bool = True) -> dash.Dash
     return dash.Dash(
         __name__,
         title=title,
+        assets_folder=str(_ASSETS_DIR),
         external_stylesheets=[dbc.themes.FLATLY, dbc.icons.BOOTSTRAP],
         suppress_callback_exceptions=suppress_callback_exceptions,
     )

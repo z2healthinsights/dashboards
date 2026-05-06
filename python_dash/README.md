@@ -78,12 +78,36 @@ Caveats specific to local DuckDB Tuva installs:
   is published separately by Tuva and isn't part of the standard dbt
   build. The dashboard renders gracefully with empty visuals if that
   schema is missing.
-- The six scaffolded dashboards don't issue queries yet, so they render
-  identically against any backend.
+## Running the unified shell (recommended)
 
-## Running a dashboard
+For demos and exploration, run the Tuva-branded shell that hosts every
+dashboard under one URL:
 
-From `python_dash/` with the venv active:
+```bash
+python -m dashboards
+```
+
+Defaults to http://127.0.0.1:8050 — a home page lists every dashboard,
+the navbar lets you jump between them, and each route has a deep link:
+
+| Route | Dashboard |
+| --- | --- |
+| `/` | Home (catalog of dashboards) |
+| `/cost-and-utilization` | Cost & Utilization |
+| `/cost-drivers` | Cost Drivers |
+| `/dqi-analytics` | DQI Analytics |
+| `/mssp-aco` | MSSP ACO Performance |
+| `/population-health` | Population Health |
+| `/quality-measures` | Quality Measures |
+| `/risk-adjusted-benchmarks` | Risk-Adjusted Benchmarks |
+| `/semantic-layer` | Semantic Layer |
+
+Branding (logo and palette) is sourced from the Power BI theme files,
+so the Dash shell visually matches the PBI gallery.
+
+## Running a single dashboard standalone
+
+For development of a single dashboard, run it on its own:
 
 ```bash
 python -m dashboards.dqi_analytics
