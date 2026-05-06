@@ -1,0 +1,30 @@
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Editor
+.idea/
+.vscode/

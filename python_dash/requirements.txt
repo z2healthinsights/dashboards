@@ -1,0 +1,23 @@
+# Core Dash stack
+dash==4.1.0
+dash-bootstrap-components==2.0.4
+plotly==6.7.0
+pandas==2.3.3
+
+# Config
+python-dotenv==1.2.2
+
+# Warehouse drivers — install only what you need.
+# DuckDB is the easiest local option (Tuva's default for `dbt build` runs).
+# Tuva ships duckdb >=1.5; older clients can't read newer storage.
+duckdb>=1.5.0
+
+# Snowflake is the default for hosted Tuva deployments. The secure local
+# storage extra avoids repeated browser logins during local SSO sessions.
+snowflake-connector-python[pandas,secure-local-storage]==4.4.0
+
+# Other warehouses (uncomment what you use)
+# google-cloud-bigquery[pandas]==3.27.0
+# redshift-connector==2.1.5
+# pyodbc==5.2.0                 # ODBC, SQL Server, Microsoft Fabric
+# sqlalchemy==2.0.36            # optional, simplifies cross-warehouse query code

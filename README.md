@@ -4,14 +4,21 @@ Welcome to the Tuva Project Analytics Gallery repository! This repository contai
 
 ## Repository Contents
 
-This repository currently includes Power BI .pbip files that are displayed in the [Tuva Analytics Gallery](https://thetuvaproject.com/analytics/analytics-gallery). These files allow users to explore and understand how we built the dashboards featured in the gallery.
+This repository includes:
 
-## Getting Started
+- `power_bi/` — Power BI `.pbip` and `.pbit` files displayed in the [Tuva Analytics Gallery](https://thetuvaproject.com/analytics/analytics-gallery).
+- `python_dash/` — Python [Dash](https://dash.plotly.com/) equivalents of the same dashboards, for users who want to run Tuva locally without installing Power BI Desktop. See [`python_dash/README.md`](python_dash/README.md) for setup.
+
+## Getting Started — Power BI
 
 1. Clone this repository or download the .pbip files directly.
 2. Ensure you have [Power BI Desktop](https://powerbi.microsoft.com/en-us/desktop/) installed on your computer.
 3. Open the .pbip files using Power BI Desktop to explore the dashboards and their underlying structure.
-4. Change the parameter **load_data** to true and update the rest of the parameters with your database and account information
+4. Change the parameter **load_data** to true and update the rest of the parameters with your database and account information.
+
+## Getting Started — Python Dash
+
+See [`python_dash/README.md`](python_dash/README.md) for venv setup, warehouse driver selection, and per-dashboard run commands.
 
 ## Contributing
 
