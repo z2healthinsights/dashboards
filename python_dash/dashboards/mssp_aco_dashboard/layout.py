@@ -2,6 +2,11 @@
 
 Mirrors the 6 PBI pages: Program Performance Summary, Practice, Provider,
 Patient, Quality Measure Detail, HCC Gaps Detail.
+
+The Program Performance and Practice pages also set actual PMPM against the
+MSSP benchmark from the two semantic layer benchmark facts (see
+`benchmark.py`). A rate selector above the tabs switches the benchmark
+between the flat, enrollment-type and risk-adjusted rates.
 """
 
 from __future__ import annotations
@@ -12,9 +17,10 @@ import plotly.express as px
 from dash import Input, Output, callback, dash_table, dcc, html
 
 from tuva_dash.components import kpi_card, kpi_row, no_data_message, page_shell
+from tuva_dash.config import get_settings
 from tuva_dash.lazy import LazyFrame
 
-from . import queries
+from . import benchmark, queries
 
 # Lazy module-level cache. Importing this module registers callbacks without
 # pulling every MSSP table from Snowflake during app startup.
@@ -26,8 +32,29 @@ _HCC_GAPS = LazyFrame(queries.load_hcc_gaps)
 _ENCOUNTERS = LazyFrame(queries.load_encounters)
 _PQI_RATE = LazyFrame(queries.load_pqi_rate)
 _PQI_DENOM = LazyFrame(queries.load_pqi_denom)
+_BENCH = LazyFrame(queries.load_member_month_benchmark)
+_ACO_QUARTERS = LazyFrame(queries.load_benchmark_aco_quarter)
+# Member months with the benchmark rates beside them: the same rows as _MM,
+# with NaN rates wherever the benchmark fact is absent or does not cover.
+_BENCH_MM = LazyFrame(lambda: benchmark.merge_benchmark(_MM.frame(), _BENCH.frame()))
 
 QUALITY_TARGET = 0.80
+
+_SAVINGS_STATUS = {
+    "above_msr": ("Savings above MSR", "success"),
+    "below_msr": ("Savings below MSR", "warning"),
+    "no_savings": ("No savings", "danger"),
+}
+
+_ROLLUP_LABELS = {
+    "practice": "Practice", "provider": "Provider", "members": "Members",
+    "member_months": "Member Months", "paid": "Paid", "pmpm": "PMPM",
+    "actual_pmpm": "Actual PMPM", "benchmark_pmpm": "Benchmark PMPM",
+    "variance_pmpm": "Variance", "excluded_member_months": "Excluded MM",
+    "avg_risk": "Avg Risk",
+}
+_BENCHMARK_ROLLUP_COLUMNS = ["actual_pmpm", "benchmark_pmpm", "variance_pmpm",
+                             "excluded_member_months"]
 
 
 # -- formatting helpers ------------------------------------------------------
@@ -40,8 +67,45 @@ def _pmpm(v) -> str:
     return "—" if pd.isna(v) else f"${v:,.2f}"
 
 
+def _signed_pmpm(v) -> str:
+    return "—" if pd.isna(v) else f"{'+' if v >= 0 else '-'}${abs(v):,.2f}"
+
+
 def _pct(v) -> str:
     return "—" if pd.isna(v) else f"{v * 100:.1f}%"
+
+
+def _ratio(v) -> str:
+    return "—" if pd.isna(v) else f"{v:.3f}"
+
+
+def _has_benchmark() -> bool:
+    return not _BENCH.empty
+
+
+def _benchmark_missing_message() -> dbc.Alert:
+    """Context-aware alert for the benchmark elements.
+
+    With LOAD_DATA=false the shared message tells the user how to enable
+    queries. With LOAD_DATA=true an empty benchmark frame means the two
+    benchmark facts are not in the warehouse, which the standard Tuva
+    build does not produce, so say that instead of blaming LOAD_DATA.
+    """
+    if not get_settings().load_data:
+        return no_data_message()
+    return dbc.Alert(
+        [
+            html.Strong("Benchmark facts not loaded. "),
+            "This view reads ",
+            html.Code("semantic_layer.fact_member_month_benchmark"),
+            " and ",
+            html.Code("semantic_layer.fact_benchmark_aco_quarter"),
+            ", which the MSSP benchmark models build beside the Tuva semantic "
+            "layer. Build those models to populate the benchmark comparison; "
+            "the rest of this dashboard is unaffected.",
+        ],
+        color="info",
+    )
 
 
 # -- shared rollup helpers ---------------------------------------------------
@@ -59,11 +123,13 @@ def _attribution_label(col: str) -> str:
     return col.replace("_", " ").title()
 
 
-def _practice_rollup() -> pd.DataFrame:
-    if _MM.empty:
-        return pd.DataFrame()
+def _rollup(df: pd.DataFrame, group_col: str, name_col: str,
+            rate_key: str | None) -> pd.DataFrame:
+    """Members, member-months, paid, PMPM and risk by group, plus — when a
+    rate is selected and the benchmark fact is present — actual against the
+    selected benchmark over the member-months that carry that rate."""
     g = (
-        _MM.groupby("payer_attributed_provider_practice", dropna=False)
+        df.groupby(group_col, dropna=False)
         .agg(
             members=("person_id", "nunique"),
             member_months=("member_months", "sum"),
@@ -71,29 +137,193 @@ def _practice_rollup() -> pd.DataFrame:
             avg_risk=("normalized_risk_score", "mean"),
         ).reset_index()
     )
-    g["practice"] = g["payer_attributed_provider_practice"].fillna("(unattributed)")
+    g[name_col] = g[group_col].fillna(benchmark.UNATTRIBUTED)
     g["pmpm"] = g["paid"] / g["member_months"].where(g["member_months"] != 0)
-    return g[["practice", "members", "member_months", "paid", "pmpm", "avg_risk"]]
+    cols = [name_col, "members", "member_months", "paid", "pmpm"]
+    if rate_key is not None and _has_benchmark():
+        b = benchmark.rollup(df, group_col, rate_key).rename(columns={group_col: name_col})
+        g = g.merge(b[[name_col, *_BENCHMARK_ROLLUP_COLUMNS]], on=name_col, how="left")
+        cols += _BENCHMARK_ROLLUP_COLUMNS
+    return g[[*cols, "avg_risk"]]
 
 
-def _provider_rollup(practice: str | None = None) -> pd.DataFrame:
+def _practice_rollup(rate_key: str | None = None) -> pd.DataFrame:
     if _MM.empty:
         return pd.DataFrame()
-    df = _MM
+    return _rollup(_BENCH_MM.frame(), "payer_attributed_provider_practice", "practice",
+                   rate_key)
+
+
+def _provider_rollup(practice: str | None = None,
+                     rate_key: str | None = None) -> pd.DataFrame:
+    if _MM.empty:
+        return pd.DataFrame()
+    df = _BENCH_MM.frame()
     if practice and practice != "(all)":
-        df = df[df["payer_attributed_provider_practice"].fillna("(unattributed)") == practice]
-    g = (
-        df.groupby("payer_attributed_provider", dropna=False)
-        .agg(
-            members=("person_id", "nunique"),
-            member_months=("member_months", "sum"),
-            paid=("total_paid", "sum"),
-            avg_risk=("normalized_risk_score", "mean"),
-        ).reset_index()
+        df = df[df["payer_attributed_provider_practice"].fillna(benchmark.UNATTRIBUTED)
+                == practice]
+    return _rollup(df, "payer_attributed_provider", "provider", rate_key)
+
+
+def _rollup_table(rollup: pd.DataFrame) -> dash_table.DataTable:
+    disp = rollup.copy()
+    disp["paid"] = disp["paid"].round(0)
+    for col in ("pmpm", "avg_risk", "actual_pmpm", "benchmark_pmpm", "variance_pmpm"):
+        if col in disp.columns:
+            disp[col] = disp[col].round(2)
+    if "excluded_member_months" in disp.columns:
+        disp["excluded_member_months"] = disp["excluded_member_months"].astype(int)
+    disp = disp.rename(columns=_ROLLUP_LABELS)
+    return dash_table.DataTable(
+        data=disp.to_dict("records"),
+        columns=[{"name": c, "id": c} for c in disp.columns],
+        page_size=15, sort_action="native",
+        style_cell={"fontSize": 12, "padding": "4px"},
+        style_header={"fontWeight": "bold"},
+        style_table={"overflowX": "auto"},
     )
-    g["provider"] = g["payer_attributed_provider"].fillna("(unattributed)")
-    g["pmpm"] = g["paid"] / g["member_months"].where(g["member_months"] != 0)
-    return g[["provider", "members", "member_months", "paid", "pmpm", "avg_risk"]]
+
+
+def _pmpm_bar(rollup: pd.DataFrame, name_col: str, title: str, rate_label: str | None):
+    """Horizontal PMPM bars; grouped actual-vs-benchmark when a rate is shown."""
+    if rate_label is None or "benchmark_pmpm" not in rollup.columns:
+        fig = px.bar(rollup.sort_values("pmpm"), x="pmpm", y=name_col,
+                     orientation="h", title=title)
+    else:
+        long = rollup.sort_values("actual_pmpm").melt(
+            id_vars=[name_col], value_vars=["actual_pmpm", "benchmark_pmpm"],
+            var_name="measure", value_name="value",
+        )
+        long["measure"] = long["measure"].map({
+            "actual_pmpm": "Actual", "benchmark_pmpm": f"Benchmark ({rate_label})",
+        })
+        fig = px.bar(long, x="value", y=name_col, color="measure", orientation="h",
+                     barmode="group", title=title)
+        fig.update_layout(legend_title_text="", legend=dict(orientation="h", y=-0.15))
+    fig.update_layout(height=320, xaxis_tickprefix="$", xaxis_tickformat=",",
+                      yaxis_title="", xaxis_title="")
+    return fig
+
+
+def _rollup_section(rollup: pd.DataFrame, name_col: str, table_title: str,
+                    bar_title: str, rate_key: str | None):
+    """Bar chart beside the rollup table, with the benchmark note when shown."""
+    if rollup.empty:
+        return no_data_message()
+    label = benchmark.rate(rate_key).label if rate_key is not None else None
+    note = []
+    if label is not None:
+        note = [html.P(
+            f"Actual PMPM, Benchmark PMPM and Variance are over the member-months "
+            f"that carry a {label.lower()} benchmark rate; Excluded MM counts those "
+            f"without one. Variance is actual minus benchmark, so positive means "
+            f"spending above the benchmark.",
+            className="text-muted small mt-2 mb-0",
+        )]
+    return dbc.Row([
+        dbc.Col(dcc.Graph(figure=_pmpm_bar(rollup, name_col, bar_title, label)), md=6),
+        dbc.Col([html.H5(table_title), _rollup_table(rollup), *note], md=6),
+    ])
+
+
+def _benchmark_kpis(df: pd.DataFrame, rate_key: str | None) -> dbc.Row:
+    """Actual PMPM, the three benchmark rates, and the variance to the selected one."""
+    selected = benchmark.rate(rate_key)
+    sel = benchmark.totals(df, selected.key)
+    flat = benchmark.totals(df, "flat")
+    by_type = benchmark.totals(df, "enrollment_type")
+    ra_key = "risk_adjusted" if selected.key == "risk_adjusted" else "risk_adjusted_capped"
+    ra = benchmark.totals(df, ra_key)
+    variance = sel["variance_pmpm"]
+    if pd.isna(variance):
+        variance_color = "secondary"
+    else:
+        variance_color = "danger" if variance > 0 else "success"
+    return kpi_row([
+        kpi_card("Actual PMPM", _pmpm(sel["actual_pmpm"]),
+                 sub=f"{int(sel['benchmark_member_months']):,} member-months with a "
+                     f"{selected.label.lower()} rate"),
+        kpi_card("Flat Benchmark PMPM", _pmpm(flat["benchmark_pmpm"])),
+        kpi_card("Enrollment-Type Benchmark PMPM", _pmpm(by_type["benchmark_pmpm"])),
+        kpi_card("Risk-Adjusted Benchmark PMPM", _pmpm(ra["benchmark_pmpm"]),
+                 sub="uncapped" if ra_key == "risk_adjusted"
+                 else "capped by the aggregate risk ratio cap"),
+        kpi_card(f"Variance vs {selected.label}", _signed_pmpm(variance),
+                 sub=f"actual minus benchmark; "
+                     f"{int(sel['excluded_member_months']):,} member-months excluded",
+                 color=variance_color),
+    ])
+
+
+# -- ACO benchmark panel ------------------------------------------------------
+
+def _text(value) -> str | None:
+    """A nullable string column, whether NULL came back as None or NaN."""
+    return value if isinstance(value, str) and value else None
+
+
+def _aco_year_card(row: pd.Series) -> dbc.Card:
+    status = _text(row["savings_status"])
+    status_label, status_color = _SAVINGS_STATUS.get(status, (status or "—", "secondary"))
+    binding = benchmark.nullable_bool(row["is_cap_binding"])
+    if binding is None:
+        cap_text = "—"
+    elif binding:
+        cap_text = f"Yes (factor {_ratio(row['cap_factor'])})"
+    else:
+        cap_text = "No"
+    basis = _text(row["msr_basis_applied"])
+    msr_text = _pct(row["estimated_msr"]) + (f" ({basis})" if basis else "")
+
+    lines = [
+        ("Benchmark PMPM", _pmpm(row["mean_projected_updated_benchmark_pmpm"])),
+        ("Expenditure PMPM", _pmpm(row["aco_expenditure_per_capita_pmpm"])),
+        ("Projected savings", _pct(row["projected_savings_percentage"])),
+        ("MSR", msr_text),
+        ("Savings status", dbc.Badge(status_label, color=status_color)),
+        ("Aggregate risk ratio", _ratio(row["aggregate_risk_ratio"])),
+        ("Cap upper bound", _ratio(row["cap_upper_bound"])),
+        ("Cap binds", cap_text),
+        ("Risk-adjusted benchmark PMPM", _pmpm(row["risk_adjusted_benchmark_pmpm"])),
+    ]
+    body = html.Table(
+        html.Tbody([
+            html.Tr([html.Td(k, className="text-muted small pe-3"),
+                     html.Td(v, className="small fw-semibold")])
+            for k, v in lines
+        ]),
+        className="table table-sm table-borderless mb-0",
+    )
+    parts = [
+        dbc.CardHeader([
+            html.Strong(f"PY {int(row['performance_year'])} — {row['period']}"),
+            html.Br(),
+            html.Small(f"Benchmark delivery {row['benchmark_submission_id']}",
+                       className="text-muted"),
+        ]),
+        dbc.CardBody(body),
+    ]
+    if benchmark.nullable_bool(row["is_agreement_defaulted"]):
+        parts.append(dbc.CardFooter(html.Small(
+            "Agreement row defaulted: the prospective trend behind this "
+            "projection was defaulted, so these figures rest on that default.",
+            className="text-warning",
+        )))
+    return dbc.Card(parts, className="h-100")
+
+
+def _aco_panel():
+    """One card per performance year from the current-projection rows."""
+    if _ACO_QUARTERS.empty:
+        return _benchmark_missing_message()
+    current = benchmark.current_projections(_ACO_QUARTERS.frame())
+    if current.empty:
+        return dbc.Alert("No current-projection rows in fact_benchmark_aco_quarter.",
+                         color="info")
+    return dbc.Row([
+        dbc.Col(_aco_year_card(row), md=6, xl=4, className="mb-3")
+        for _, row in current.iterrows()
+    ])
 
 
 # -- Program Performance Summary --------------------------------------------
@@ -118,41 +348,33 @@ def _program_summary_tab() -> html.Div:
         kpi_card("Quality Meeting Target", _pct(quality_pct)),
     ])
 
-    practices = _practice_rollup()
-    practices_disp = practices.copy()
-    practices_disp["paid"] = practices_disp["paid"].round(0)
-    practices_disp["pmpm"] = practices_disp["pmpm"].round(2)
-    practices_disp["avg_risk"] = practices_disp["avg_risk"].round(2)
-    practices_disp = practices_disp.rename(columns={
-        "practice": "Practice", "members": "Members",
-        "member_months": "Member Months", "paid": "Paid",
-        "pmpm": "PMPM", "avg_risk": "Avg Risk",
-    })
-
-    fig = px.bar(
-        practices.sort_values("pmpm"),
-        x="pmpm", y="practice", orientation="h",
-        title="PMPM by attributed practice",
-    )
-    fig.update_layout(height=320, xaxis_tickprefix="$", xaxis_tickformat=",",
-                      yaxis_title="", xaxis_title="")
-
     return html.Div([
         cards,
-        dbc.Row([
-            dbc.Col(dcc.Graph(figure=fig), md=6),
-            dbc.Col([
-                html.H5("Practice rollup"),
-                dash_table.DataTable(
-                    data=practices_disp.to_dict("records"),
-                    columns=[{"name": c, "id": c} for c in practices_disp.columns],
-                    page_size=15, sort_action="native",
-                    style_cell={"fontSize": 12, "padding": "4px"},
-                    style_header={"fontWeight": "bold"},
-                ),
-            ], md=6),
-        ]),
+        html.H5("Benchmark comparison"),
+        html.Div(id="mssp-benchmark-kpis"),
+        html.Div(id="mssp-practice-rollup"),
+        html.H5("ACO benchmark projections", className="mt-3"),
+        _aco_panel(),
     ], className="pt-3")
+
+
+@callback(
+    Output("mssp-benchmark-kpis", "children"),
+    Output("mssp-practice-rollup", "children"),
+    Input("mssp-benchmark-rate", "value"),
+)
+def _render_program_benchmark(rate_key):
+    """Benchmark KPI row and the practice rollup, both on the selected rate.
+
+    Without the benchmark fact the KPI row is the benchmark alert and the
+    practice rollup is the plain PMPM view it always was.
+    """
+    has = _has_benchmark()
+    rate_key = rate_key if has else None
+    kpis = _benchmark_kpis(_BENCH_MM.frame(), rate_key) if has else _benchmark_missing_message()
+    section = _rollup_section(_practice_rollup(rate_key), "practice", "Practice rollup",
+                              "PMPM by attributed practice", rate_key)
+    return kpis, section
 
 
 # -- Practice tab (callback-driven) -----------------------------------------
@@ -160,61 +382,58 @@ def _program_summary_tab() -> html.Div:
 @callback(
     Output("mssp-practice-content", "children"),
     Input("mssp-practice-select", "value"),
+    Input("mssp-benchmark-rate", "value"),
 )
-def _render_practice(practice):
+def _render_practice(practice, rate_key=None):
     if not practice:
         return dbc.Alert("Pick a practice to see provider-level performance.",
                          color="info", className="mt-3")
 
-    df = _MM[_MM["payer_attributed_provider_practice"].fillna("(unattributed)") == practice]
+    frame = _BENCH_MM.frame()
+    df = frame[frame["payer_attributed_provider_practice"].fillna(benchmark.UNATTRIBUTED)
+               == practice]
     members_n = df["person_id"].nunique()
     total_mm = float(df["member_months"].sum()) or 1.0
     total_paid = float(df["total_paid"].sum())
     avg_risk = float(df["normalized_risk_score"].mean()) if not df.empty else float("nan")
     quality_pct = _quality_meeting_target_pct()
+    has = _has_benchmark()
+    rate_key = rate_key if has else None
 
-    cards = kpi_row([
+    cards = [
         kpi_card("Practice", practice),
         kpi_card("Members", f"{members_n:,}"),
         kpi_card("PMPM", _pmpm(total_paid / total_mm) if total_mm else "—"),
+    ]
+    if has:
+        cards += _benchmark_cards(df, rate_key)
+    cards += [
         kpi_card("Avg Risk",
                  f"{avg_risk:.2f}" if avg_risk == avg_risk else "—"),
         kpi_card("Quality Meeting Target", _pct(quality_pct)),
-    ])
+    ]
 
-    providers = _provider_rollup(practice)
-    if providers.empty:
-        return [cards, no_data_message()]
+    section = _rollup_section(_provider_rollup(practice, rate_key), "provider",
+                              "Provider rollup", "PMPM by provider", rate_key)
+    return [kpi_row(cards), section]
 
-    providers_disp = providers.copy()
-    providers_disp["paid"] = providers_disp["paid"].round(0)
-    providers_disp["pmpm"] = providers_disp["pmpm"].round(2)
-    providers_disp["avg_risk"] = providers_disp["avg_risk"].round(2)
-    providers_disp = providers_disp.rename(columns={
-        "provider": "Provider", "members": "Members",
-        "member_months": "Member Months", "paid": "Paid",
-        "pmpm": "PMPM", "avg_risk": "Avg Risk",
-    })
 
-    fig = px.bar(providers.sort_values("pmpm"), x="pmpm", y="provider",
-                 orientation="h", title="PMPM by provider")
-    fig.update_layout(height=320, xaxis_tickprefix="$", xaxis_tickformat=",",
-                      yaxis_title="", xaxis_title="")
-
-    return [cards,
-            dbc.Row([
-                dbc.Col(dcc.Graph(figure=fig), md=6),
-                dbc.Col([
-                    html.H5("Provider rollup"),
-                    dash_table.DataTable(
-                        data=providers_disp.to_dict("records"),
-                        columns=[{"name": c, "id": c} for c in providers_disp.columns],
-                        page_size=15, sort_action="native",
-                        style_cell={"fontSize": 12, "padding": "4px"},
-                        style_header={"fontWeight": "bold"},
-                    ),
-                ], md=6),
-            ])]
+def _benchmark_cards(df: pd.DataFrame, rate_key: str | None) -> list[dbc.Card]:
+    """Benchmark PMPM and variance cards for a filtered member-month frame."""
+    selected = benchmark.rate(rate_key)
+    t = benchmark.totals(df, selected.key)
+    variance = t["variance_pmpm"]
+    if pd.isna(variance):
+        color = "secondary"
+    else:
+        color = "danger" if variance > 0 else "success"
+    return [
+        kpi_card(f"Benchmark PMPM ({selected.label})", _pmpm(t["benchmark_pmpm"]),
+                 sub=f"{int(t['excluded_member_months']):,} member-months excluded"),
+        kpi_card("Variance", _signed_pmpm(variance),
+                 sub=f"actual {_pmpm(t['actual_pmpm'])} over the same member-months",
+                 color=color),
+    ]
 
 
 # -- Provider tab (callback-driven) -----------------------------------------
@@ -222,13 +441,15 @@ def _render_practice(practice):
 @callback(
     Output("mssp-provider-content", "children"),
     Input("mssp-provider-select", "value"),
+    Input("mssp-benchmark-rate", "value"),
 )
-def _render_provider(provider):
+def _render_provider(provider, rate_key=None):
     if not provider:
         return dbc.Alert("Pick a provider to see their patient panel and quality / HCC gaps.",
                          color="info", className="mt-3")
 
-    df = _MM[_MM["payer_attributed_provider"].fillna("(unattributed)") == provider]
+    frame = _BENCH_MM.frame()
+    df = frame[frame["payer_attributed_provider"].fillna(benchmark.UNATTRIBUTED) == provider]
     panel = df["person_id"].unique()
     panel_members = _MEMBERS[_MEMBERS["person_id"].isin(panel)]
     panel_n = len(panel)
@@ -236,13 +457,16 @@ def _render_provider(provider):
     total_paid = float(df["total_paid"].sum())
     avg_risk = float(df["normalized_risk_score"].mean()) if not df.empty else float("nan")
 
-    cards = kpi_row([
+    cards = [
         kpi_card("Provider", provider),
         kpi_card("Panel size", f"{panel_n:,}"),
         kpi_card("PMPM", _pmpm(total_paid / total_mm) if total_mm else "—"),
-        kpi_card("Avg Risk",
-                 f"{avg_risk:.2f}" if avg_risk == avg_risk else "—"),
-    ])
+    ]
+    if _has_benchmark():
+        cards += _benchmark_cards(df, rate_key)
+    cards.append(kpi_card("Avg Risk",
+                          f"{avg_risk:.2f}" if avg_risk == avg_risk else "—"))
+    cards = kpi_row(cards)
 
     # Top HCC gaps for the panel
     hcc = _HCC_GAPS[_HCC_GAPS["person_id"].isin(panel)] if panel_n else pd.DataFrame()
@@ -504,7 +728,9 @@ def build_layout() -> html.Div:
         for _, m in _MEMBERS.iterrows():
             label = f"{m['person_id']}"
             if m.get("first_name") or m.get("last_name"):
-                label += f" — {(m.get('first_name') or '').strip()} {(m.get('last_name') or '').strip()}"
+                first = (m.get("first_name") or "").strip()
+                last = (m.get("last_name") or "").strip()
+                label += f" — {first} {last}"
             patient_options.append({"label": label, "value": m["person_id"]})
 
     practice_tab = html.Div([
@@ -543,7 +769,19 @@ def build_layout() -> html.Div:
         html.Div(id="mssp-patient-content"),
     ], className="pt-3")
 
-    body = dbc.Tabs([
+    # The benchmark rate drives the Program Performance KPI row and the
+    # practice and provider rollups, so it sits above the tabs.
+    rate_selector = html.Div([
+        html.Label("Benchmark rate:", className="small text-muted me-2"),
+        dbc.RadioItems(
+            id="mssp-benchmark-rate",
+            options=[{"label": r.label, "value": r.key} for r in benchmark.RATES.values()],
+            value=benchmark.DEFAULT_RATE,
+            inline=True,
+        ),
+    ], className="d-flex align-items-center flex-wrap mb-2")
+
+    tabs = dbc.Tabs([
         dbc.Tab(_program_summary_tab(), label="Program Performance"),
         dbc.Tab(practice_tab, label="Practice"),
         dbc.Tab(provider_tab, label="Provider"),
@@ -555,14 +793,17 @@ def build_layout() -> html.Div:
     return page_shell(
         title="MSSP ACO Performance",
         subtitle=(
-            "Practice and provider rollups, patient charts, quality "
-            "measure gaps, and HCC suspect gaps for the attributed cohort."
+            "Practice and provider rollups against the MSSP benchmark, patient "
+            "charts, quality measure gaps, and HCC suspect gaps for the "
+            "attributed cohort."
         ),
-        body=body,
+        body=html.Div([rate_selector, tabs]),
         tuva_tables=[
             "semantic_layer.fact_member_months",
             "semantic_layer.dim_member_months",
             "semantic_layer.dim_member",
+            "semantic_layer.fact_member_month_benchmark",
+            "semantic_layer.fact_benchmark_aco_quarter",
             "semantic_layer.fact_member_condition_bridge",
             "semantic_layer.dim_condition",
             "semantic_layer.fact_hcc_gaps",

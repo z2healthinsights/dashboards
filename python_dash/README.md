@@ -78,6 +78,63 @@ Caveats specific to local DuckDB Tuva installs:
   is published separately by Tuva and isn't part of the standard dbt
   build. The dashboard renders gracefully with empty visuals if that
   schema is missing.
+- **MSSP ACO Performance** reads two optional benchmark facts described
+  below. Without them the benchmark elements show an alert and the rest of
+  the dashboard is unchanged.
+
+### Semantic layer benchmark facts (MSSP ACO Performance)
+
+The MSSP benchmark models build two facts in the `semantic_layer` schema
+beside the standard Tuva tables. The Dash MSSP ACO dashboard reads them;
+the Power BI MSSP ACO template does not yet, and can be extended the same
+way.
+
+| Fact | Grain | Join |
+| --- | --- | --- |
+| `semantic_layer.fact_member_month_benchmark` | one row per member-month | one to one to `fact_member_months`; the fact carries both the surrogate key `member_month_sk` (`person_id \|\| '\|' \|\| year_month`) and the natural key `(person_id, year_month)`. The Dash app joins on the natural key, so only the benchmark elements depend on the new fact |
+| `semantic_layer.fact_benchmark_aco_quarter` | one row per ACO, performance year and reported quarter | to the member-month fact on `aco_id` and `performance_year`; the row flagged `is_current_projection` is the one each year's member rates were read from |
+
+Rate columns on `fact_member_month_benchmark`, each a PMPM for the
+member-month:
+
+- `flat_benchmark_pmpm` — the ACO's mean projected updated benchmark, the
+  same on every member-month of the performance year.
+- `enrollment_type_benchmark_pmpm` — the rate for the member's
+  `enrollment_type`; NULL where no type resolved.
+- `risk_adjusted_benchmark_pmpm` — the type rate scaled by the member's
+  `risk_ratio` (CMS prospective HCC score over the BY3 type score),
+  uncapped; NULL where the member has no `risk_score`.
+- `risk_adjusted_benchmark_pmpm_capped` — the same under the ACO's
+  aggregate cap: the uncapped rate times the year's `cap_factor`.
+
+Each rate has a `variance_to_*` column (`total_paid` minus the rate, so
+positive means spending above benchmark), and every row carries the
+delivery it came from (`benchmark_period`, `benchmark_submission_id`,
+`is_agreement_defaulted`). A rate is NULL where the fact could not compute
+it, so a report aggregating a rate should count member-months over the
+rows where that rate is present — the dashboard's tables show that count
+as "Excluded MM" and compute the actual PMPM it compares against over the
+same member-months.
+
+`fact_benchmark_aco_quarter` carries the ACO-level view: benchmark and
+expenditure PMPM (`mean_projected_updated_benchmark_pmpm`,
+`aco_expenditure_per_capita_pmpm`), `projected_savings_percentage`,
+`estimated_msr` with `msr_basis_applied`, `savings_status`
+(`above_msr` / `below_msr` / `no_savings`), the `aggregate_risk_ratio`
+against `cap_upper_bound`, `cap_factor`, `is_cap_binding` (the cap is
+one-sided: it binds only when the aggregate ratio exceeds the bound), and
+`risk_adjusted_benchmark_pmpm`. The `*_scenario` columns are a labelled
+projection of the cap with a national growth term and are not used by the
+dashboard. Filter on `is_current_projection` for one row per year.
+
+To extend the Power BI MSSP ACO model the same way: import both tables,
+relate `fact_member_month_benchmark` to `fact_member_months` one to one
+(on `member_month_sk` where the semantic layer carries it, otherwise on
+`person_id` and `year_month`), write the benchmark
+PMPM measures as `SUM(rate) / SUM(member_months)` filtered to rows where
+the rate is not blank, and read the ACO card from the
+`is_current_projection` rows of `fact_benchmark_aco_quarter`.
+
 ## Running the unified shell (recommended)
 
 For demos and exploration, run the Tuva-branded shell that hosts every
@@ -128,6 +185,18 @@ Override host/port via `DASH_HOST` / `DASH_PORT` in `.env`.
 Set `LOAD_DATA=false` in `.env`. Apps will open with empty frames matching the
 expected schema, exactly as the PBI files do when their `load_data` parameter
 is false.
+
+### Tests
+
+The tests under `tests/` build a small synthetic DuckDB in a temp directory
+and run the dashboard query and aggregation functions against it; no
+warehouse or credentials are needed.
+
+```bash
+# from the python_dash/ directory, in the venv
+pip install pytest
+pytest
+```
 
 ## Adding a new dashboard
 
