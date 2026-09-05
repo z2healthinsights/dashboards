@@ -29,6 +29,13 @@ enrollment-type rates agree by construction; the non-assigned data-sharing
 members can carry a very different enrollment mix, so on the full
 population the two rates drift apart for mix reasons rather than
 performance. `filter_population` narrows a merged frame before `rollup`.
+
+The risk figures the dashboard shows come from the same fact: `risk_score`
+is the CMS prospective HCC score from the assignment list, the score the
+risk-adjusted rates use, `by3_enrollment_type_risk_score` the BY3 score for
+the member's enrollment type, and `risk_ratio` the first over the second.
+Tuva's `normalized_risk_score` on `fact_member_months` is a CMS-HCC MA-model
+score no rate uses; the dashboard falls back to it only without the fact.
 """
 
 from __future__ import annotations
@@ -144,6 +151,35 @@ def filter_population(df: pd.DataFrame, population: Population) -> pd.DataFrame:
     if population.year is not None:
         keep &= calendar_year(df["year_month"]) == int(population.year)
     return df[keep]
+
+
+def _weighted_mean(values: pd.Series, weights: pd.Series) -> float:
+    """Mean of `values` weighted by `weights` over the rows where a value is present."""
+    values = pd.to_numeric(values, errors="coerce")
+    present = values.notna()
+    total = weights[present].sum()
+    return float((values[present] * weights[present]).sum() / total) if total else float("nan")
+
+
+def risk_summary(df: pd.DataFrame) -> pd.Series:
+    """The CMS risk figures of a member-month frame, weighted by member-months.
+
+    `mean_risk_score` is over the scored member-months, whose count is
+    `scored_member_months`; unscored member-months stay out of the mean but
+    are still in the frame's member-month count. `mean_risk_ratio` and
+    `mean_by3_risk_score` are over the member-months that carry each, which
+    can be fewer: a member with a score but no resolved enrollment type has
+    no BY3 score and no ratio. Each is NaN where nothing carries it.
+    """
+    weights = pd.to_numeric(df["member_months"], errors="coerce").fillna(0)
+    out = {"scored_member_months": 0.0}
+    for column, name in (("risk_score", "mean_risk_score"), ("risk_ratio", "mean_risk_ratio"),
+                         ("by3_enrollment_type_risk_score", "mean_by3_risk_score")):
+        out[name] = _weighted_mean(df[column], weights) if column in df.columns else float("nan")
+    if "risk_score" in df.columns:
+        scored = pd.to_numeric(df["risk_score"], errors="coerce").notna()
+        out["scored_member_months"] = float(weights[scored].sum())
+    return pd.Series(out)
 
 
 def rollup(df: pd.DataFrame, group_col: str, rate_key: str | None) -> pd.DataFrame:

@@ -151,6 +151,28 @@ count; quality is the programme-wide figure.
   member-months to that calendar year and the projections panel to that
   year's current-projection card; a year without one shows an alert.
 
+#### Risk scores
+
+The dashboard's risk figures are the CMS prospective HCC scores from the
+assignment list, read from `fact_member_month_benchmark`: `risk_score` is
+the score the risk-adjusted rates use, `by3_enrollment_type_risk_score` is
+the BY3 CMS-HCC score for the member's enrollment type, and `risk_ratio` is
+the first over the second. The headline "Avg CMS Risk Score" card is the
+member-month-weighted mean score over the scored member-months of the
+selected population, with the mean ratio and the scored count as its
+subtitle; "Avg Benchmark Risk Score" beside it is the mean BY3 score over
+the same member-months, so the pair reads as the performance-year score
+against the benchmark-year score. The practice and provider tables show
+the CMS score as "Avg CMS Risk".
+
+Tuva's `normalized_risk_score` on `fact_member_months` is a CMS-HCC
+MA-model score attached by diagnosis-collection month and normalized with
+a payment-year factor; no benchmark rate uses it, and it is NULL for the
+latest year until the next payment year's factor is in the Tuva seed. It
+stays in the queries and appears as the last table column, "Avg Risk
+(Tuva)". Without the benchmark fact the headline card falls back to it,
+labelled "Avg Normalized Risk (Tuva)".
+
 The caption under each rollup table states the population and year in
 force, e.g. "Assigned members, PY2026, 8 member-months; 2 excluded for
 lacking the enrollment type rate.", so a screenshot is self-describing.

@@ -56,7 +56,7 @@ _ROLLUP_LABELS = {
     "member_months": "Member Months", "paid": "Paid", "pmpm": "PMPM",
     "actual_pmpm": "Actual PMPM", "benchmark_pmpm": "Benchmark PMPM",
     "variance_pmpm": "Variance", "excluded_member_months": "Excluded MM",
-    "avg_risk": "Avg Risk",
+    "avg_cms_risk": "Avg CMS Risk", "avg_risk": "Avg Risk (Tuva)",
 }
 _BENCHMARK_ROLLUP_COLUMNS = ["actual_pmpm", "benchmark_pmpm", "variance_pmpm",
                              "excluded_member_months"]
@@ -82,6 +82,10 @@ def _pct(v) -> str:
 
 def _ratio(v) -> str:
     return "—" if pd.isna(v) else f"{v:.3f}"
+
+
+def _ratio2(v) -> str:
+    return "—" if pd.isna(v) else f"{v:.2f}"
 
 
 def _has_benchmark() -> bool:
@@ -159,16 +163,22 @@ def _rollup(df: pd.DataFrame, group_col: str, name_col: str,
             rate_key: str | None) -> pd.DataFrame:
     """Members, member-months, paid, PMPM and risk by group, plus — when a
     rate is selected and the benchmark fact is present — actual against the
-    selected benchmark over the member-months that carry that rate."""
-    g = (
-        df.groupby(group_col, dropna=False)
-        .agg(
-            members=("person_id", "nunique"),
-            member_months=("member_months", "sum"),
-            paid=("total_paid", "sum"),
-            avg_risk=("normalized_risk_score", "mean"),
-        ).reset_index()
+    selected benchmark over the member-months that carry that rate.
+
+    Risk is the CMS prospective score (`avg_cms_risk`, over the scored
+    member-months) when the benchmark fact is present, with Tuva's MA-model
+    score kept as the last column; without the fact only the Tuva score is
+    available."""
+    aggregates = dict(
+        members=("person_id", "nunique"),
+        member_months=("member_months", "sum"),
+        paid=("total_paid", "sum"),
+        avg_risk=("normalized_risk_score", "mean"),
     )
+    has_cms = _has_benchmark() and "risk_score" in df.columns
+    if has_cms:
+        aggregates["avg_cms_risk"] = ("risk_score", "mean")
+    g = df.groupby(group_col, dropna=False).agg(**aggregates).reset_index()
     g[name_col] = g[group_col].fillna(benchmark.UNATTRIBUTED)
     g["pmpm"] = g["paid"] / g["member_months"].where(g["member_months"] != 0)
     cols = [name_col, "members", "member_months", "paid", "pmpm"]
@@ -176,6 +186,8 @@ def _rollup(df: pd.DataFrame, group_col: str, name_col: str,
         b = benchmark.rollup(df, group_col, rate_key).rename(columns={group_col: name_col})
         g = g.merge(b[[name_col, *_BENCHMARK_ROLLUP_COLUMNS]], on=name_col, how="left")
         cols += _BENCHMARK_ROLLUP_COLUMNS
+    if has_cms:
+        cols.append("avg_cms_risk")
     return g[[*cols, "avg_risk"]]
 
 
@@ -201,7 +213,8 @@ def _provider_rollup(practice: str | None, rate_key: str | None,
 def _rollup_table(rollup: pd.DataFrame) -> dash_table.DataTable:
     disp = rollup.copy()
     disp["paid"] = disp["paid"].round(0)
-    for col in ("pmpm", "avg_risk", "actual_pmpm", "benchmark_pmpm", "variance_pmpm"):
+    for col in ("pmpm", "avg_risk", "avg_cms_risk", "actual_pmpm", "benchmark_pmpm",
+                "variance_pmpm"):
         if col in disp.columns:
             disp[col] = disp[col].round(2)
     if "excluded_member_months" in disp.columns:
@@ -280,6 +293,28 @@ def _rollup_section(rollup: pd.DataFrame, name_col: str, table_title: str,
         dbc.Col(dcc.Graph(figure=_pmpm_bar(rollup, name_col, bar_title, label)), md=6),
         dbc.Col([html.H5(table_title), _rollup_table(rollup), *note], md=6),
     ])
+
+
+def _risk_cards(df: pd.DataFrame) -> list[dbc.Card]:
+    """The risk cards for a member-month frame.
+
+    With the benchmark fact: the mean CMS prospective score over the scored
+    member-months, with its ratio to the BY3 score, beside the mean BY3
+    enrollment-type score — the performance-year score against the
+    benchmark-year score. Without the fact only Tuva's MA-model score is
+    available, and one card shows it, labelled as such.
+    """
+    if not _has_benchmark():
+        avg_risk = float(df["normalized_risk_score"].mean()) if not df.empty else float("nan")
+        return [kpi_card("Avg Normalized Risk (Tuva)", _ratio2(avg_risk))]
+    risk = benchmark.risk_summary(df)
+    return [
+        kpi_card("Avg CMS Risk Score", _ratio2(risk["mean_risk_score"]),
+                 sub=f"ratio to BY3 {_ratio2(risk['mean_risk_ratio'])}; "
+                     f"{int(risk['scored_member_months']):,} scored member-months"),
+        kpi_card("Avg Benchmark Risk Score", _ratio2(risk["mean_by3_risk_score"]),
+                 sub="BY3 population, weighted by member-months"),
+    ]
 
 
 def _benchmark_kpis(df: pd.DataFrame, rate_key: str | None) -> dbc.Row:
@@ -428,15 +463,13 @@ def _render_program_kpis(assigned_only=True, year=None):
     members_n = df["person_id"].nunique()
     total_mm = float(df["member_months"].sum())
     total_paid = float(df["total_paid"].sum())
-    avg_risk = float(df["normalized_risk_score"].mean()) if not df.empty else float("nan")
     return kpi_row([
         kpi_card("Attributed Members", f"{members_n:,}"),
         kpi_card("Member Months", f"{int(total_mm):,}",
                  sub=population.describe() if _has_benchmark() else None),
         kpi_card("Total Paid", _money(total_paid)),
         kpi_card("PMPM", _pmpm(total_paid / total_mm) if total_mm else "—"),
-        kpi_card("Avg Normalized Risk",
-                 f"{avg_risk:.2f}" if avg_risk == avg_risk else "—"),
+        *_risk_cards(df),
         kpi_card("Quality Meeting Target", _pct(_quality_meeting_target_pct())),
     ])
 
@@ -493,7 +526,6 @@ def _render_practice(practice, rate_key=None, assigned_only=True, year=None):
     members_n = df["person_id"].nunique()
     total_mm = float(df["member_months"].sum()) or 1.0
     total_paid = float(df["total_paid"].sum())
-    avg_risk = float(df["normalized_risk_score"].mean()) if not df.empty else float("nan")
     quality_pct = _quality_meeting_target_pct()
     has = _has_benchmark()
     rate_key = rate_key if has else None
@@ -505,11 +537,7 @@ def _render_practice(practice, rate_key=None, assigned_only=True, year=None):
     ]
     if has:
         cards += _benchmark_cards(df, rate_key)
-    cards += [
-        kpi_card("Avg Risk",
-                 f"{avg_risk:.2f}" if avg_risk == avg_risk else "—"),
-        kpi_card("Quality Meeting Target", _pct(quality_pct)),
-    ]
+    cards += [*_risk_cards(df), kpi_card("Quality Meeting Target", _pct(quality_pct))]
 
     section = _rollup_section(_provider_rollup(practice, rate_key, population), "provider",
                               "Provider rollup", "PMPM by provider", rate_key, population)
@@ -556,7 +584,6 @@ def _render_provider(provider, rate_key=None, assigned_only=True, year=None):
     panel_n = len(panel)
     total_mm = float(df["member_months"].sum()) or 1.0
     total_paid = float(df["total_paid"].sum())
-    avg_risk = float(df["normalized_risk_score"].mean()) if not df.empty else float("nan")
 
     cards = [
         kpi_card("Provider", provider),
@@ -565,8 +592,7 @@ def _render_provider(provider, rate_key=None, assigned_only=True, year=None):
     ]
     if _has_benchmark():
         cards += _benchmark_cards(df, rate_key)
-    cards.append(kpi_card("Avg Risk",
-                          f"{avg_risk:.2f}" if avg_risk == avg_risk else "—"))
+    cards += _risk_cards(df)
     cards = kpi_row(cards)
 
     # Top HCC gaps for the panel
@@ -659,7 +685,7 @@ def _render_patient(person_id):
                  f"{int(m['age']) if pd.notna(m['age']) else '—'} / "
                  f"{(m.get('sex') or '—')}"),
         kpi_card("PMPM", _pmpm(paid / mm_n) if mm_n else "—"),
-        kpi_card("Avg Risk", f"{risk:.2f}" if risk == risk else "—"),
+        kpi_card("Avg Risk (Tuva)", f"{risk:.2f}" if risk == risk else "—"),
         kpi_card("Provider", attributed_provider or "(unattributed)"),
     ])
 

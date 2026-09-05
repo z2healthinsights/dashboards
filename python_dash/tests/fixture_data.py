@@ -18,13 +18,18 @@ Non-assigned members (data-sharing only), performance year 2026:
 Practice C  P5, P6, P7 pay 550/month. All are aged/non-dual with a type
             rate of 600, well under the flat rate, so the enrollment-type
             benchmark over the full population is pulled away from the flat
-            one by the enrollment mix rather than by spending. Ratio 1.0,
-            so 600 uncapped and 480 capped.
+            one by the enrollment mix rather than by spending. Score 1.0
+            against a BY3 type score of 1.25, ratio 0.8, so 480 uncapped and
+            384 capped.
 
 Performance year 2025 (flat 950, cap factor 1.0, type rates 100 lower):
 one month (202512) for P1, P3 and P5, paying what they always pay.
 
 Two months (202601, 202602) per member in 2026, one member-month per row.
+
+The BY3 enrollment-type score on each benchmark row is the member's score
+over their ratio (1.0 for P1 and P3), and NULL where the ratio is NULL (P2
+has no score, P4 no enrollment type).
 
 `conftest.py` turns `build_duckdb` into pytest fixtures; the tests import
 the row counts from here.
@@ -48,9 +53,9 @@ MEMBERS = [
     ("P2", "Practice A", "Dr One", 500.0, "aged_dual", None, None, 1200.0, None, True),
     ("P3", "Practice B", "Dr Two", 700.0, "disabled", 0.5, 0.5, 800.0, 400.0, True),
     ("P4", "Practice B", "Dr Three", 100.0, None, 1.1, None, None, None, True),
-    ("P5", "Practice C", "Dr Four", 550.0, "aged_non_dual", 1.0, 1.0, 600.0, 600.0, False),
-    ("P6", "Practice C", "Dr Four", 550.0, "aged_non_dual", 1.0, 1.0, 600.0, 600.0, False),
-    ("P7", "Practice C", "Dr Four", 550.0, "aged_non_dual", 1.0, 1.0, 600.0, 600.0, False),
+    ("P5", "Practice C", "Dr Four", 550.0, "aged_non_dual", 1.0, 0.8, 600.0, 480.0, False),
+    ("P6", "Practice C", "Dr Four", 550.0, "aged_non_dual", 1.0, 0.8, 600.0, 480.0, False),
+    ("P7", "Practice C", "Dr Four", 550.0, "aged_non_dual", 1.0, 0.8, 600.0, 480.0, False),
 ]
 
 # Per performance year: flat rate, cap factor, shift applied to the 2026
@@ -100,11 +105,13 @@ def _member_month_frames() -> dict[str, pd.DataFrame]:
             ra = type_rate * ratio if type_rate is not None and ratio is not None else None
             assert (ra is None) == (ra_rate is None)
             capped = ra * y["cap"] if ra is not None else None
+            by3 = score / ratio if score is not None and ratio is not None else None
             bench_rows.append({
                 "member_month_sk": sk, "person_id": pid, "data_source": "synthetic",
                 "patient_source_key": f"{pid}|synthetic", "year_month": ym,
                 "performance_year": year, "aco_id": "ACO-TEST", "is_assigned": assigned,
                 "enrollment_type": etype, "risk_score": score, "risk_ratio": ratio,
+                "by3_enrollment_type_risk_score": by3,
                 "flat_benchmark_pmpm": y["flat"],
                 "enrollment_type_benchmark_pmpm": type_rate,
                 "risk_adjusted_benchmark_pmpm": ra,

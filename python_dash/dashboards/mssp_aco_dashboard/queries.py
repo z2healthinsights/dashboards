@@ -51,6 +51,7 @@ def load_member_months() -> pd.DataFrame:
 MEMBER_MONTH_BENCHMARK_COLUMNS = [
     "member_month_sk", "person_id", "year_month", "performance_year", "aco_id",
     "is_assigned", "enrollment_type", "risk_score", "risk_ratio",
+    "by3_enrollment_type_risk_score",
     "flat_benchmark_pmpm", "enrollment_type_benchmark_pmpm",
     "risk_adjusted_benchmark_pmpm", "cap_factor",
     "risk_adjusted_benchmark_pmpm_capped",

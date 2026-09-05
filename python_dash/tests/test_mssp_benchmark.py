@@ -400,7 +400,7 @@ def test_program_kpi_row_values(all_joined):
     values = _card_values(layout._render_program_kpis(False, 2026))
     assert values["Total Paid"] == layout._money(full["total_paid"].sum()) == "$9,100"
     assert values["PMPM"] == "$650.00"
-    assert values["Avg Normalized Risk"] == f"{full['normalized_risk_score'].mean():.2f}"
+    assert "Avg Normalized Risk (Tuva)" not in values  # the CMS cards replace it
 
 
 def test_program_kpi_row_without_benchmark_is_the_whole_frame(no_benchmark_db):
@@ -409,6 +409,115 @@ def test_program_kpi_row_without_benchmark_is_the_whole_frame(no_benchmark_db):
     assert values["Attributed Members"] == "7"
     bodies = _find(layout._render_program_kpis(True, None), dbc.CardBody)
     assert all(len(b.children) == 2 for b in bodies), "no population label without the fact"
+
+
+# -- risk cards ----------------------------------------------------------------
+
+def _card_subs(component) -> dict[str, str]:
+    """KPI card label -> subtitle, for the cards that have one."""
+    return {
+        str(b.children[0].children): str(b.children[2].children)
+        for b in _find(component, dbc.CardBody)
+        if isinstance(b.children, list) and len(b.children) > 2
+    }
+
+
+def _weighted(df, column):
+    hit = df[df[column].notna()]
+    return (hit[column] * hit["member_months"]).sum() / hit["member_months"].sum()
+
+
+def test_risk_summary(all_joined):
+    assigned = benchmark.filter_population(all_joined, DEFAULT_POPULATION)
+    risk = benchmark.risk_summary(assigned)
+    # P1 (1.5), P3 (0.5) and P4 (1.1) are scored, two months each; P2 is not.
+    assert risk["scored_member_months"] == 6
+    assert risk["mean_risk_score"] == pytest.approx(3.1 / 3)
+    # P4 has a score but no enrollment type, so no BY3 score and no ratio.
+    assert risk["mean_risk_ratio"] == pytest.approx(1.0)
+    assert risk["mean_by3_risk_score"] == pytest.approx(1.0)
+
+    full = benchmark.filter_population(all_joined, FULL_2026)
+    risk = benchmark.risk_summary(full)
+    assert risk["scored_member_months"] == 12
+    assert risk["mean_risk_score"] == pytest.approx(_weighted(full, "risk_score"))
+    assert risk["mean_risk_ratio"] == pytest.approx(0.88)
+    assert risk["mean_by3_risk_score"] == pytest.approx(1.15)
+
+    empty = benchmark.risk_summary(assigned.iloc[0:0])
+    assert empty["scored_member_months"] == 0 and math.isnan(empty["mean_risk_score"])
+    # A frame without the fact's columns has no CMS figures.
+    plain = benchmark.risk_summary(assigned[["member_months", "total_paid"]])
+    assert math.isnan(plain["mean_risk_score"]) and plain["scored_member_months"] == 0
+
+
+@pytest.mark.parametrize("assigned_only, year", [(True, 2026), (False, 2026), (True, 2025)])
+def test_headline_risk_cards_are_the_cms_scores(all_joined, assigned_only, year):
+    frame = benchmark.filter_population(all_joined, benchmark.Population(assigned_only, year))
+    row = layout._render_program_kpis(assigned_only, year)
+    values, subs = _card_values(row), _card_subs(row)
+    assert values["Avg CMS Risk Score"] == f"{_weighted(frame, 'risk_score'):.2f}"
+    assert values["Avg Benchmark Risk Score"] == \
+        f"{_weighted(frame, 'by3_enrollment_type_risk_score'):.2f}"
+    scored = int(frame.loc[frame["risk_score"].notna(), "member_months"].sum())
+    assert subs["Avg CMS Risk Score"] == \
+        f"ratio to BY3 {_weighted(frame, 'risk_ratio'):.2f}; {scored:,} scored member-months"
+    assert subs["Avg Benchmark Risk Score"] == "BY3 population, weighted by member-months"
+    # Unscored member-months leave the mean but stay in the member-month count.
+    unscored = int(frame.loc[frame["risk_score"].isna(), "member_months"].sum())
+    assert values["Member Months"] == str(scored + unscored)
+    assert "Avg Normalized Risk (Tuva)" not in values
+
+
+def test_headline_risk_card_worked_figures(full_db):
+    values, subs = (f(layout._render_program_kpis(True, 2026)) for f in (_card_values, _card_subs))
+    assert values["Avg CMS Risk Score"] == "1.03"  # (1.5 + 0.5 + 1.1) / 3
+    assert values["Avg Benchmark Risk Score"] == "1.00"
+    assert subs["Avg CMS Risk Score"] == "ratio to BY3 1.00; 6 scored member-months"
+    assert values["Member Months"] == "8"
+
+
+def test_risk_card_falls_back_to_the_tuva_score_without_the_fact(no_benchmark_db):
+    mm = queries.load_member_months()
+    row = layout._render_program_kpis(True, None)
+    values = _card_values(row)
+    assert values["Avg Normalized Risk (Tuva)"] == f"{mm['normalized_risk_score'].mean():.2f}"
+    assert "Avg CMS Risk Score" not in values and "Avg Benchmark Risk Score" not in values
+    practice = _card_values(layout._render_practice("Practice A", "flat"))
+    assert "Avg Normalized Risk (Tuva)" in practice and "Avg CMS Risk Score" not in practice
+
+
+def test_practice_and_provider_risk_cards_follow_the_population(full_db):
+    practice = layout._render_practice("Practice A", "flat", True, 2026)
+    values, subs = _card_values(practice), _card_subs(practice)
+    assert values["Avg CMS Risk Score"] == "1.50"  # P1 only; P2 is unscored
+    assert subs["Avg CMS Risk Score"] == "ratio to BY3 1.50; 2 scored member-months"
+    assert values["Avg Benchmark Risk Score"] == "1.00"
+    provider = _card_values(layout._render_provider("Dr Four", "flat", False, 2026))
+    assert provider["Avg CMS Risk Score"] == "1.00"
+    assert provider["Avg Benchmark Risk Score"] == "1.25"
+
+
+def test_rollup_tables_carry_the_cms_score_first_and_the_tuva_score_last(full_db):
+    _, section = layout._render_program_benchmark("flat", True, 2026)
+    table = _find(section, dash_table.DataTable)[0]
+    cols = [c["name"] for c in table.columns]
+    assert cols.index("Avg CMS Risk") < cols.index("Avg Risk (Tuva)") == len(cols) - 1
+    assert "Avg Risk" not in cols
+    by_practice = {r["Practice"]: r for r in table.data}
+    assert by_practice["Practice A"]["Avg CMS Risk"] == pytest.approx(1.5)
+    assert by_practice["Practice A"]["Avg Risk (Tuva)"] == pytest.approx(1.25)
+    assert by_practice["Practice B"]["Avg CMS Risk"] == pytest.approx(0.8)
+
+    out = layout._render_practice("Practice B", "flat", True, 2026)
+    provider_cols = [c["name"] for c in _find(out, dash_table.DataTable)[0].columns]
+    assert "Avg CMS Risk" in provider_cols and "Avg Risk (Tuva)" in provider_cols
+
+
+def test_rollup_tables_keep_only_the_tuva_score_without_the_fact(no_benchmark_db):
+    _, section = layout._render_program_benchmark("flat")
+    cols = [c["name"] for c in _find(section, dash_table.DataTable)[0].columns]
+    assert "Avg Risk (Tuva)" in cols and "Avg CMS Risk" not in cols
 
 
 def test_year_filter_selects_the_member_months(full_db):
