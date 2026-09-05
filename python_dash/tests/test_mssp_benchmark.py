@@ -14,10 +14,10 @@ import math
 
 import dash_bootstrap_components as dbc
 import pytest
-from conftest import N_ASSIGNED_2026, N_MEMBER_MONTHS
 from dash import dash_table, dcc, html
 
 from dashboards.mssp_aco_dashboard import benchmark, layout, queries
+from tests.fixture_data import N_ASSIGNED_2026, N_MEMBER_MONTHS
 
 PRACTICE = "payer_attributed_provider_practice"
 PROVIDER = "payer_attributed_provider"
@@ -376,6 +376,39 @@ def test_toggle_off_is_the_full_population(all_joined):
     on_table = _find(on_section, dash_table.DataTable)[0]
     assert {r["Practice"] for r in on_table.data} == {"Practice A", "Practice B"}
     assert "Assigned members, PY2026, 8 member-months; 0 excluded" in _caption(on_section)
+
+
+@pytest.mark.parametrize("assigned_only, year, members, member_months", [
+    (True, 2026, 4, 8), (False, 2026, 7, 14), (True, 2025, 2, 2), (False, 2025, 3, 3),
+    (True, None, 4, 8),  # None is the latest projection year
+])
+def test_program_kpi_row_follows_the_population(full_db, assigned_only, year, members,
+                                                member_months):
+    """The headline row counts the same member-months as the caption below it."""
+    values = _card_values(layout._render_program_kpis(assigned_only, year))
+    assert values["Attributed Members"] == str(members)
+    assert values["Member Months"] == str(member_months)
+    _, section = layout._render_program_benchmark("flat", assigned_only, year)
+    assert f"{member_months} member-months" in _caption(section)
+    subs = [c.children[2].children for c in _find(layout._render_program_kpis(assigned_only, year),
+                                                  dbc.CardBody) if len(c.children) > 2]
+    assert benchmark.Population(assigned_only, year or 2026).describe() in subs
+
+
+def test_program_kpi_row_values(all_joined):
+    full = benchmark.filter_population(all_joined, FULL_2026)
+    values = _card_values(layout._render_program_kpis(False, 2026))
+    assert values["Total Paid"] == layout._money(full["total_paid"].sum()) == "$9,100"
+    assert values["PMPM"] == "$650.00"
+    assert values["Avg Normalized Risk"] == f"{full['normalized_risk_score'].mean():.2f}"
+
+
+def test_program_kpi_row_without_benchmark_is_the_whole_frame(no_benchmark_db):
+    values = _card_values(layout._render_program_kpis(True, None))
+    assert values["Member Months"] == str(N_MEMBER_MONTHS)
+    assert values["Attributed Members"] == "7"
+    bodies = _find(layout._render_program_kpis(True, None), dbc.CardBody)
+    assert all(len(b.children) == 2 for b in bodies), "no population label without the fact"
 
 
 def test_year_filter_selects_the_member_months(full_db):

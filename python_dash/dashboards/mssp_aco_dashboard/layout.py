@@ -9,8 +9,9 @@ MSSP benchmark from the two semantic layer benchmark facts (see
 the ACO projections panel: the benchmark rate (flat, enrollment type,
 risk-adjusted), whether to compare over assigned members only (the default)
 or every member-month with a benchmark, and the performance year (default
-the latest with a projection). The original KPI row of the Program
-Performance page is not filtered by them.
+the latest with a projection). The Program Performance KPI row follows the
+same population, so it and the benchmark caption below it never report two
+member-month counts for what looks like one population.
 """
 
 from __future__ import annotations
@@ -398,31 +399,46 @@ def _render_aco_panel(year=None):
 def _program_summary_tab() -> html.Div:
     if _MM.empty:
         return html.Div([no_data_message()], className="pt-3")
-
-    members_n = _MM["person_id"].nunique()
-    total_mm = float(_MM["member_months"].sum()) or 1.0
-    total_paid = float(_MM["total_paid"].sum())
-    avg_risk = float(_MM["normalized_risk_score"].mean())
-    quality_pct = _quality_meeting_target_pct()
-
-    cards = kpi_row([
-        kpi_card("Attributed Members", f"{members_n:,}"),
-        kpi_card("Member Months", f"{int(total_mm):,}"),
-        kpi_card("Total Paid", _money(total_paid)),
-        kpi_card("PMPM", _pmpm(total_paid / total_mm)),
-        kpi_card("Avg Normalized Risk",
-                 f"{avg_risk:.2f}" if avg_risk == avg_risk else "—"),
-        kpi_card("Quality Meeting Target", _pct(quality_pct)),
-    ])
-
     return html.Div([
-        cards,
+        html.Div(id="mssp-program-kpis"),
         html.H5("Benchmark comparison"),
         html.Div(id="mssp-benchmark-kpis"),
         html.Div(id="mssp-practice-rollup"),
         html.H5("ACO benchmark projections", className="mt-3"),
         html.Div(id="mssp-aco-panel"),
     ], className="pt-3")
+
+
+@callback(
+    Output("mssp-program-kpis", "children"),
+    Input("mssp-benchmark-assigned-only", "value"),
+    Input("mssp-benchmark-year", "value"),
+)
+def _render_program_kpis(assigned_only=True, year=None):
+    """The headline KPI row over the selected population.
+
+    Members, member months, paid, PMPM and risk are read from the same
+    member-months as the benchmark comparison below, so the two agree on
+    the count; the Member Months card names the population when the
+    benchmark fact is present to filter on. Quality is the programme-wide
+    figure and does not follow the controls.
+    """
+    population = _population(assigned_only, year)
+    df = _population_frame(population)
+    members_n = df["person_id"].nunique()
+    total_mm = float(df["member_months"].sum())
+    total_paid = float(df["total_paid"].sum())
+    avg_risk = float(df["normalized_risk_score"].mean()) if not df.empty else float("nan")
+    return kpi_row([
+        kpi_card("Attributed Members", f"{members_n:,}"),
+        kpi_card("Member Months", f"{int(total_mm):,}",
+                 sub=population.describe() if _has_benchmark() else None),
+        kpi_card("Total Paid", _money(total_paid)),
+        kpi_card("PMPM", _pmpm(total_paid / total_mm) if total_mm else "—"),
+        kpi_card("Avg Normalized Risk",
+                 f"{avg_risk:.2f}" if avg_risk == avg_risk else "—"),
+        kpi_card("Quality Meeting Target", _pct(_quality_meeting_target_pct())),
+    ])
 
 
 @callback(

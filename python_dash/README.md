@@ -129,10 +129,12 @@ dashboard. Filter on `is_current_projection` for one row per year.
 
 #### Benchmark controls
 
-Three controls above the dashboard's tabs govern the benchmark KPI row,
-the practice and provider rollups and bars, and the ACO projections
-panel. The original Program Performance KPI row (attributed members,
-member months, total paid, PMPM, risk, quality) is not filtered by them.
+Three controls above the dashboard's tabs govern the Program Performance
+KPI row, the benchmark KPI row, the practice and provider rollups and
+bars, and the ACO projections panel. The headline row (attributed members,
+member months, total paid, PMPM, risk) reads the same member-months as the
+benchmark comparison, so it and the caption below never disagree on the
+count; quality is the programme-wide figure.
 
 - **Benchmark rate** — which of the four rate columns actual PMPM is set
   against. The tables count member-months without the selected rate as

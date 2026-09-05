@@ -30,7 +30,10 @@ def dash_app():
 
 def _mssp_callbacks(app):
     cbs = [cb for cb in app._callback_list if "mssp-" in cb["output"]]
-    assert len(cbs) >= 5, [cb["output"] for cb in app._callback_list]
+    outputs = {cb["output"] for cb in cbs}
+    assert {"mssp-program-kpis.children", "mssp-aco-panel.children",
+            "mssp-practice-content.children"} <= outputs, outputs
+    assert len(cbs) == 6, outputs
     return cbs
 
 
