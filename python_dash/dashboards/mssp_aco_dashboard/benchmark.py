@@ -20,6 +20,15 @@ benchmark side and the matched actual, and are counted as excluded, so a
 practice's benchmark PMPM and the actual PMPM it is set against cover one
 population. Variance is actual minus benchmark; positive means spending
 above the benchmark.
+
+Which member-months a comparison runs over is a `Population`: assigned
+members only (the ACO's assigned beneficiaries, `is_assigned` on the fact)
+or every member-month, and one performance year or all of them. The
+benchmark was built for the assigned population, and on it the flat and
+enrollment-type rates agree by construction; the non-assigned data-sharing
+members can carry a very different enrollment mix, so on the full
+population the two rates drift apart for mix reasons rather than
+performance. `filter_population` narrows a merged frame before `rollup`.
 """
 
 from __future__ import annotations
@@ -37,6 +46,26 @@ class Rate(NamedTuple):
     key: str
     label: str
     column: str
+
+
+class Population(NamedTuple):
+    """The member-months a benchmark comparison runs over.
+
+    `assigned_only` keeps the member-months the benchmark fact flags
+    `is_assigned`; a member-month the fact does not cover has no flag and is
+    outside the assigned population. `year` keeps one calendar year of
+    `year_month`, which is the performance year on covered rows; None keeps
+    every year.
+    """
+
+    assigned_only: bool = True
+    year: int | None = None
+
+    def describe(self) -> str:
+        """Short label for captions, e.g. 'Assigned members, PY2026'."""
+        who = "Assigned members" if self.assigned_only else "All members"
+        when = f"PY{self.year}" if self.year is not None else "all performance years"
+        return f"{who}, {when}"
 
 
 RATES: dict[str, Rate] = {
@@ -96,6 +125,27 @@ def merge_benchmark(member_months: pd.DataFrame, bench: pd.DataFrame) -> pd.Data
     return merged
 
 
+def calendar_year(year_month: pd.Series) -> pd.Series:
+    """The year of a `year_month` key such as '202601' (or 202601); NaN if unparseable."""
+    return pd.to_numeric(year_month.astype(str).str[:4], errors="coerce")
+
+
+def filter_population(df: pd.DataFrame, population: Population) -> pd.DataFrame:
+    """The rows of a merged member-month frame inside `population`.
+
+    Filters on `year_month` rather than the fact's `performance_year` so an
+    uncovered member-month (NULL rates, counted as excluded downstream) still
+    belongs to its year when the population is not assigned-only.
+    """
+    keep = pd.Series(True, index=df.index)
+    if population.assigned_only:
+        assigned = df["is_assigned"] if "is_assigned" in df.columns else []
+        keep &= pd.Series([nullable_bool(v) is True for v in assigned], index=df.index)
+    if population.year is not None:
+        keep &= calendar_year(df["year_month"]) == int(population.year)
+    return df[keep]
+
+
 def rollup(df: pd.DataFrame, group_col: str, rate_key: str | None) -> pd.DataFrame:
     """Actual against the selected benchmark rate, by `group_col`.
 
@@ -142,6 +192,20 @@ def totals(df: pd.DataFrame, rate_key: str | None) -> pd.Series:
         })
     out = rollup(df.assign(_all="all"), "_all", rate_key)
     return out.iloc[0][ROLLUP_COLUMNS]
+
+
+def projection_years(aco_quarters: pd.DataFrame) -> list[int]:
+    """Every performance year with a row in `fact_benchmark_aco_quarter`, ascending."""
+    if aco_quarters.empty or "performance_year" not in aco_quarters.columns:
+        return []
+    years = pd.to_numeric(aco_quarters["performance_year"], errors="coerce").dropna()
+    return sorted({int(y) for y in years})
+
+
+def latest_projection_year(aco_quarters: pd.DataFrame) -> int | None:
+    """The default performance year: the latest with a projection, if any."""
+    years = projection_years(aco_quarters)
+    return years[-1] if years else None
 
 
 def current_projections(aco_quarters: pd.DataFrame) -> pd.DataFrame:

@@ -1,18 +1,30 @@
 """Synthetic DuckDB fixtures for the MSSP ACO benchmark tests.
 
 Every row here is invented. The numbers are chosen so the expected
-rollups are exact and the variance sign flips between rates:
+rollups are exact and the variance sign flips between rates.
+
+Assigned members, performance year 2026 (flat 1000, cap factor 0.8):
 
 Practice A  P1 (aged/dual, scored) pays 1600/month, P2 (aged/dual, no
-            score) pays 500/month. Flat 1000, enrollment-type 1200. P1's
-            risk ratio 1.5 gives an uncapped risk-adjusted rate of 1800,
-            capped by the year's factor 0.8 to 1440. P2 has no
-            risk-adjusted rate.
+            score) pays 500/month. Enrollment-type rate 1200. P1's risk
+            ratio 1.5 gives an uncapped risk-adjusted rate of 1800, capped
+            by the year's factor to 1440. P2 has no risk-adjusted rate.
 Practice B  P3 (disabled, scored) pays 700/month against a type rate of
             800, ratio 0.5, so 400 uncapped and 320 capped. P4 has no
             resolved enrollment type and carries the flat rate only.
 
-Two months (202601, 202602) per member, one member-month per row.
+Non-assigned members (data-sharing only), performance year 2026:
+
+Practice C  P5, P6, P7 pay 550/month. All are aged/non-dual with a type
+            rate of 600, well under the flat rate, so the enrollment-type
+            benchmark over the full population is pulled away from the flat
+            one by the enrollment mix rather than by spending. Ratio 1.0,
+            so 600 uncapped and 480 capped.
+
+Performance year 2025 (flat 950, cap factor 1.0, type rates 100 lower):
+one month (202512) for P1, P3 and P5, paying what they always pay.
+
+Two months (202601, 202602) per member in 2026, one member-month per row.
 """
 
 from __future__ import annotations
@@ -27,28 +39,53 @@ from tuva_dash.config import get_settings
 from tuva_dash.lazy import LazyFrame
 
 MONTHS = ["202601", "202602"]
+PRIOR_MONTHS = ["202512"]
+PRIOR_YEAR_MEMBERS = {"P1", "P3", "P5"}
 
 MEMBERS = [
     # person_id, practice, provider, paid, enrollment_type, risk_score,
-    # risk_ratio, enrollment_type_rate, risk_adjusted_rate
-    ("P1", "Practice A", "Dr One", 1600.0, "aged_dual", 1.5, 1.5, 1200.0, 1800.0),
-    ("P2", "Practice A", "Dr One", 500.0, "aged_dual", None, None, 1200.0, None),
-    ("P3", "Practice B", "Dr Two", 700.0, "disabled", 0.5, 0.5, 800.0, 400.0),
-    ("P4", "Practice B", "Dr Three", 100.0, None, 1.1, None, None, None),
+    # risk_ratio, enrollment_type_rate, risk_adjusted_rate, is_assigned
+    ("P1", "Practice A", "Dr One", 1600.0, "aged_dual", 1.5, 1.5, 1200.0, 1800.0, True),
+    ("P2", "Practice A", "Dr One", 500.0, "aged_dual", None, None, 1200.0, None, True),
+    ("P3", "Practice B", "Dr Two", 700.0, "disabled", 0.5, 0.5, 800.0, 400.0, True),
+    ("P4", "Practice B", "Dr Three", 100.0, None, 1.1, None, None, None, True),
+    ("P5", "Practice C", "Dr Four", 550.0, "aged_non_dual", 1.0, 1.0, 600.0, 600.0, False),
+    ("P6", "Practice C", "Dr Four", 550.0, "aged_non_dual", 1.0, 1.0, 600.0, 600.0, False),
+    ("P7", "Practice C", "Dr Four", 550.0, "aged_non_dual", 1.0, 1.0, 600.0, 600.0, False),
 ]
 
-FLAT_RATE = 1000.0
-CAP_FACTOR = 0.8
+# Per performance year: flat rate, cap factor, shift applied to the 2026
+# type and risk-adjusted rates, and the delivery the rates came from.
+YEARS = {
+    2026: {"flat": 1000.0, "cap": 0.8, "rate_shift": 0.0,
+           "period": "2026Q2", "submission": "BENCH-T26"},
+    2025: {"flat": 950.0, "cap": 1.0, "rate_shift": -100.0,
+           "period": "2025Q4", "submission": "BENCH-T25"},
+}
+FLAT_RATE = YEARS[2026]["flat"]
+CAP_FACTOR = YEARS[2026]["cap"]
+
+# Row counts the tests check the loaders against.
+N_MEMBER_MONTHS = len(MEMBERS) * len(MONTHS) + len(PRIOR_YEAR_MEMBERS) * len(PRIOR_MONTHS)
+N_ASSIGNED_2026 = sum(m[-1] for m in MEMBERS) * len(MONTHS)
+
+
+def _member_months_of(pid: str) -> list[tuple[int, str]]:
+    months = [(2026, ym) for ym in MONTHS]
+    if pid in PRIOR_YEAR_MEMBERS:
+        months += [(2025, ym) for ym in PRIOR_MONTHS]
+    return months
 
 
 def _member_month_frames() -> dict[str, pd.DataFrame]:
     fact_rows, dim_rows, bench_rows = [], [], []
-    for pid, practice, provider, paid, etype, score, ratio, et_rate, ra_rate in MEMBERS:
-        for ym in MONTHS:
+    for pid, practice, provider, paid, etype, score, ratio, et_rate, ra_rate, assigned in MEMBERS:
+        for year, ym in _member_months_of(pid):
+            y = YEARS[year]
             sk = f"{pid}|{ym}"
             fact_rows.append({
                 "person_id": pid, "data_source": "synthetic", "year_month": ym,
-                "year_nbr": "2026", "member_month_sk": sk,
+                "year_nbr": str(year), "member_month_sk": sk,
                 "patient_source_key": f"{pid}|synthetic", "member_months": 1,
                 "total_paid": paid, "medical_paid": paid, "pharmacy_paid": 0.0,
                 "normalized_risk_score": score if score is not None else 1.0,
@@ -59,24 +96,28 @@ def _member_month_frames() -> dict[str, pd.DataFrame]:
                 "payer_attributed_provider_practice": practice,
                 "custom_attributed_provider": None,
             })
-            capped = ra_rate * CAP_FACTOR if ra_rate is not None else None
+            type_rate = et_rate + y["rate_shift"] if et_rate is not None else None
+            # The risk-adjusted rate is the type rate times the ratio.
+            ra = type_rate * ratio if type_rate is not None and ratio is not None else None
+            assert (ra is None) == (ra_rate is None)
+            capped = ra * y["cap"] if ra is not None else None
             bench_rows.append({
                 "member_month_sk": sk, "person_id": pid, "data_source": "synthetic",
                 "patient_source_key": f"{pid}|synthetic", "year_month": ym,
-                "performance_year": 2026, "aco_id": "ACO-TEST", "is_assigned": True,
+                "performance_year": year, "aco_id": "ACO-TEST", "is_assigned": assigned,
                 "enrollment_type": etype, "risk_score": score, "risk_ratio": ratio,
-                "flat_benchmark_pmpm": FLAT_RATE,
-                "enrollment_type_benchmark_pmpm": et_rate,
-                "risk_adjusted_benchmark_pmpm": ra_rate,
-                "cap_factor": CAP_FACTOR,
+                "flat_benchmark_pmpm": y["flat"],
+                "enrollment_type_benchmark_pmpm": type_rate,
+                "risk_adjusted_benchmark_pmpm": ra,
+                "cap_factor": y["cap"],
                 "risk_adjusted_benchmark_pmpm_capped": capped,
                 "total_paid": paid,
-                "variance_to_flat": paid - FLAT_RATE,
-                "variance_to_enrollment_type": paid - et_rate if et_rate is not None else None,
-                "variance_to_risk_adjusted": paid - ra_rate if ra_rate is not None else None,
+                "variance_to_flat": paid - y["flat"],
+                "variance_to_enrollment_type": paid - type_rate if type_rate is not None else None,
+                "variance_to_risk_adjusted": paid - ra if ra is not None else None,
                 "variance_to_risk_adjusted_capped": paid - capped if capped is not None else None,
-                "has_benchmark": True, "benchmark_period": "2026Q2",
-                "benchmark_submission_id": "BENCH-T26",
+                "has_benchmark": True, "benchmark_period": y["period"],
+                "benchmark_submission_id": y["submission"],
                 "is_agreement_defaulted": False,
             })
     members = pd.DataFrame([
@@ -86,9 +127,14 @@ def _member_month_frames() -> dict[str, pd.DataFrame]:
          "data_source": "synthetic"}
         for pid, *_ in MEMBERS
     ])
+    # Columns that are NULL on every synthetic row must still register in
+    # DuckDB as VARCHAR, as they are in a real semantic layer; an untyped
+    # all-None column would come back as an integer NA instead of None.
+    dim_mm = pd.DataFrame(dim_rows).astype({"custom_attributed_provider": "string"})
+    members = members.astype({"race": "string"})
     return {
         "fact_member_months": pd.DataFrame(fact_rows),
-        "dim_member_months": pd.DataFrame(dim_rows),
+        "dim_member_months": dim_mm,
         "dim_member": members,
         "fact_member_month_benchmark": pd.DataFrame(bench_rows),
     }

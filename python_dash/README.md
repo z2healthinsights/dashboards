@@ -127,6 +127,32 @@ one-sided: it binds only when the aggregate ratio exceeds the bound), and
 projection of the cap with a national growth term and are not used by the
 dashboard. Filter on `is_current_projection` for one row per year.
 
+#### Benchmark controls
+
+Three controls above the dashboard's tabs govern the benchmark KPI row,
+the practice and provider rollups and bars, and the ACO projections
+panel. The original Program Performance KPI row (attributed members,
+member months, total paid, PMPM, risk, quality) is not filtered by them.
+
+- **Benchmark rate** — which of the four rate columns actual PMPM is set
+  against. The tables count member-months without the selected rate as
+  "Excluded MM" and compute actual PMPM over the covered member-months.
+- **Assigned members only** (default on) — compares over the member-months
+  the fact flags `is_assigned`, the beneficiaries the benchmark was built
+  for; on that population the flat and enrollment-type rates agree by
+  construction. Off, every member-month is compared, including
+  non-assigned data-sharing members whose enrollment mix can differ from
+  the ACO's, so switching rates then moves the variance for mix reasons
+  rather than performance.
+- **Performance year** — lists every year with a row in
+  `fact_benchmark_aco_quarter`, defaulting to the latest. It narrows the
+  member-months to that calendar year and the projections panel to that
+  year's current-projection card; a year without one shows an alert.
+
+The caption under each rollup table states the population and year in
+force, e.g. "Assigned members, PY2026, 8 member-months; 2 excluded for
+lacking the enrollment type rate.", so a screenshot is self-describing.
+
 To extend the Power BI MSSP ACO model the same way: import both tables,
 relate `fact_member_month_benchmark` to `fact_member_months` one to one
 (on `member_month_sk` where the semantic layer carries it, otherwise on

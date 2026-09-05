@@ -2,6 +2,10 @@
 
 Runs the query and aggregation functions against the synthetic DuckDB in
 conftest.py. Expected figures are worked in the conftest docstring.
+
+The layout callbacks default to the population the controls start on:
+assigned members only, in the latest performance year with a projection
+(PY2026 here). Tests that name neither control run on that default.
 """
 
 from __future__ import annotations
@@ -10,7 +14,8 @@ import math
 
 import dash_bootstrap_components as dbc
 import pytest
-from dash import dash_table
+from conftest import N_ASSIGNED_2026, N_MEMBER_MONTHS
+from dash import dash_table, dcc, html
 
 from dashboards.mssp_aco_dashboard import benchmark, layout, queries
 
@@ -45,19 +50,19 @@ def _find(component, cls):
 
 def test_member_months_do_not_depend_on_the_surrogate_key(full_db):
     mm = queries.load_member_months()
-    assert len(mm) == 8
+    assert len(mm) == N_MEMBER_MONTHS
     assert "member_month_sk" not in mm.columns
     assert {"person_id", "year_month"} <= set(mm.columns)
 
 
 def test_member_month_benchmark_joins_one_to_one_on_the_natural_key(full_db):
     bench = queries.load_member_month_benchmark()
-    assert len(bench) == 8
+    assert len(bench) == N_MEMBER_MONTHS
     # The fact carries the surrogate key for reference; the join uses the natural key.
     assert bench["member_month_sk"].is_unique
     assert not bench.duplicated(["person_id", "year_month"]).any()
     joined = benchmark.merge_benchmark(queries.load_member_months(), bench)
-    assert len(joined) == 8
+    assert len(joined) == N_MEMBER_MONTHS
     assert joined["flat_benchmark_pmpm"].notna().all()
     # Each member-month picked up its own row, not a neighbour's.
     p1_jan = joined[(joined["person_id"] == "P1") & (joined["year_month"] == "202601")]
@@ -68,11 +73,11 @@ def test_member_month_benchmark_joins_one_to_one_on_the_natural_key(full_db):
 
 def test_benchmark_renders_when_member_months_lack_the_surrogate_key(legacy_db):
     mm = queries.load_member_months()
-    assert len(mm) == 8  # the existing view is intact
+    assert len(mm) == N_MEMBER_MONTHS  # the existing view is intact
     joined = benchmark.merge_benchmark(mm, queries.load_member_month_benchmark())
     assert joined["flat_benchmark_pmpm"].notna().all()
-    page = layout.build_layout()
-    assert "BENCH-T26" in str(page)
+    assert layout.build_layout() is not None
+    assert "BENCH-T26" in str(layout._render_aco_panel())
     kpis, practice_section = layout._render_program_benchmark("flat")
     assert len(_find(kpis, dbc.Card)) == 5
     table = _find(practice_section, dash_table.DataTable)[0]
@@ -88,16 +93,31 @@ def test_absent_benchmark_tables_return_empty_frames(no_benchmark_db):
     assert "risk_adjusted_benchmark_pmpm_capped" in bench.columns
     assert "is_current_projection" in aco.columns
     # The existing member-month load is untouched by the missing facts.
-    assert len(queries.load_member_months()) == 8
+    assert len(queries.load_member_months()) == N_MEMBER_MONTHS
 
 
 # -- rollups -----------------------------------------------------------------
 
+DEFAULT_POPULATION = benchmark.Population(assigned_only=True, year=2026)
+FULL_2026 = benchmark.Population(assigned_only=False, year=2026)
+
+
 @pytest.fixture
-def joined(full_db):
+def all_joined(full_db):
+    """Every member-month with its benchmark row: both years, assigned or not."""
     return benchmark.merge_benchmark(
         queries.load_member_months(), queries.load_member_month_benchmark()
     )
+
+
+@pytest.fixture
+def joined(all_joined):
+    """The default population the dashboard opens on: assigned members, PY2026.
+
+    The rollup figures below were worked for these member-months before the
+    fixture grew non-assigned members and a prior year, so they hold as is.
+    """
+    return benchmark.filter_population(all_joined, DEFAULT_POPULATION)
 
 
 def test_practice_rollup_flat_rate(joined):
@@ -159,7 +179,7 @@ def test_provider_rollup(joined):
 
 def test_totals(joined):
     t = benchmark.totals(joined, "enrollment_type")
-    assert t["member_months"] == 8
+    assert t["member_months"] == N_ASSIGNED_2026 == 8
     assert t["excluded_member_months"] == 2
     assert t["actual_pmpm"] == pytest.approx(5600 / 6)
     assert t["benchmark_pmpm"] == pytest.approx(6400 / 6)
@@ -198,11 +218,9 @@ def test_layout_builds_with_benchmark_facts(full_db):
     page = layout.build_layout()
     radios = _find(page, dbc.RadioItems)
     assert any(r.id == "mssp-benchmark-rate" for r in radios)
-    # ACO panel: one card per current-projection year, labelled by delivery.
-    text = str(page)
-    assert "2026Q2" in text and "BENCH-T26" in text
-    assert "2025Q4" in text and "BENCH-T25" in text
-    assert "2026Q1" not in text  # not the current projection
+    # The projections panel is rendered by its callback, so the page itself
+    # carries no card yet; see test_year_filter_selects_the_projection_card.
+    assert any(getattr(d, "id", None) == "mssp-aco-panel" for d in _find(page, html.Div))
 
 
 def test_program_callback_renders_kpis_and_practice_table(full_db):
@@ -256,3 +274,242 @@ def test_layout_builds_with_load_data_false(no_load_data):
     assert page is not None
     kpis, practice_section = layout._render_program_benchmark("flat")
     assert _find(kpis, dbc.Alert)
+
+
+# -- population controls -------------------------------------------------------
+
+def _card_values(component) -> dict[str, str]:
+    """KPI card label -> headline value, from the card bodies in a tree."""
+    out = {}
+    for body in _find(component, dbc.CardBody):
+        children = body.children
+        if isinstance(children, list) and len(children) >= 2:
+            out[str(children[0].children)] = str(children[1].children)
+    return out
+
+
+def _caption(section) -> str:
+    texts = [p.children for p in _find(section, html.P) if isinstance(p.children, str)]
+    hits = [t for t in texts if t.startswith(("Assigned members", "All members"))]
+    assert len(hits) == 1, texts
+    return hits[0]
+
+
+def test_filter_population_by_assignment_and_year(all_joined):
+    assert len(all_joined) == N_MEMBER_MONTHS
+    assert len(benchmark.filter_population(all_joined, DEFAULT_POPULATION)) == 8
+    assert len(benchmark.filter_population(all_joined, FULL_2026)) == 14
+    assert len(benchmark.filter_population(all_joined, benchmark.Population(True, 2025))) == 2
+    assert len(benchmark.filter_population(all_joined, benchmark.Population(False, 2025))) == 3
+    assert len(benchmark.filter_population(all_joined, benchmark.Population(True, None))) == 10
+    assert len(benchmark.filter_population(all_joined, benchmark.Population(False, None))) == 17
+    # Member-months the benchmark fact does not cover have no assignment flag,
+    # so they are outside the assigned population and inside the full one.
+    uncovered = benchmark.merge_benchmark(
+        queries.load_member_months(), queries.load_member_month_benchmark().iloc[0:0]
+    )
+    assert benchmark.filter_population(uncovered, benchmark.Population(True, None)).empty
+    assert len(benchmark.filter_population(uncovered, FULL_2026)) == 14
+
+
+def test_population_describes_itself():
+    assert DEFAULT_POPULATION.describe() == "Assigned members, PY2026"
+    assert benchmark.Population(False, None).describe() == "All members, all performance years"
+
+
+def test_projection_years_come_from_the_aco_fact(full_db):
+    aco = queries.load_benchmark_aco_quarter()
+    assert benchmark.projection_years(aco) == [2025, 2026]
+    assert benchmark.latest_projection_year(aco) == 2026
+    assert benchmark.projection_years(aco.iloc[0:0]) == []
+    assert benchmark.latest_projection_year(aco.iloc[0:0]) is None
+
+
+def test_assigned_population_brings_the_flat_and_type_rates_together(all_joined):
+    """The acceptance check: on the assigned population the KPI row's actual
+    PMPM is the plain mean of total_paid, and the flat and enrollment-type
+    benchmarks sit closer together than they do on the full population, whose
+    non-assigned members carry a skewed enrollment-type mix."""
+    assigned = benchmark.filter_population(all_joined, DEFAULT_POPULATION)
+    full = benchmark.filter_population(all_joined, FULL_2026)
+
+    kpis, _ = layout._render_program_benchmark("flat", True, 2026)
+    values = _card_values(kpis)
+    expected_actual = assigned["total_paid"].mean()
+    assert expected_actual == pytest.approx(725.0)
+    assert values["Actual PMPM"] == layout._pmpm(expected_actual)
+    assert values["Flat Benchmark PMPM"] == "$1,000.00"
+    assert values["Enrollment-Type Benchmark PMPM"] == layout._pmpm(6400 / 6)
+
+    gap = {
+        "assigned": abs(benchmark.totals(assigned, "flat")["benchmark_pmpm"]
+                        - benchmark.totals(assigned, "enrollment_type")["benchmark_pmpm"]),
+        "full": abs(benchmark.totals(full, "flat")["benchmark_pmpm"]
+                    - benchmark.totals(full, "enrollment_type")["benchmark_pmpm"]),
+    }
+    assert gap["assigned"] == pytest.approx(200 / 3)
+    assert gap["full"] == pytest.approx(500 / 3)
+    assert gap["assigned"] < gap["full"]
+
+    # The same gap is visible in the KPI row with the toggle off.
+    off = _card_values(layout._render_program_benchmark("flat", False, 2026)[0])
+    assert off["Actual PMPM"] == layout._pmpm(full["total_paid"].mean()) == "$650.00"
+    assert off["Enrollment-Type Benchmark PMPM"] == layout._pmpm(10000 / 12)
+
+
+def test_toggle_off_is_the_full_population(all_joined):
+    """Off, the comparison runs over every member-month of the year with or
+    without an assignment, which is what the dashboard showed before the toggle."""
+    full = benchmark.filter_population(all_joined, FULL_2026)
+    kpis, section = layout._render_program_benchmark("flat", False, 2026)
+    table = _find(section, dash_table.DataTable)[0]
+    by_practice = {r["Practice"]: r for r in table.data}
+    assert set(by_practice) == {"Practice A", "Practice B", "Practice C"}
+    assert by_practice["Practice C"]["Member Months"] == 6
+    assert by_practice["Practice C"]["Variance"] == pytest.approx(-450.0)
+    expected = benchmark.rollup(full, PRACTICE, "flat")
+    for _, row in expected.iterrows():
+        assert by_practice[row[PRACTICE]]["Actual PMPM"] == pytest.approx(row["actual_pmpm"])
+    assert "All members, PY2026, 14 member-months; 0 excluded" in _caption(section)
+
+    on_kpis, on_section = layout._render_program_benchmark("flat", True, 2026)
+    on_table = _find(on_section, dash_table.DataTable)[0]
+    assert {r["Practice"] for r in on_table.data} == {"Practice A", "Practice B"}
+    assert "Assigned members, PY2026, 8 member-months; 0 excluded" in _caption(on_section)
+
+
+def test_year_filter_selects_the_member_months(full_db):
+    kpis, section = layout._render_program_benchmark("flat", True, 2025)
+    values = _card_values(kpis)
+    assert values["Actual PMPM"] == "$1,150.00"  # P1 1600 and P3 700 in 202512
+    assert values["Flat Benchmark PMPM"] == "$950.00"
+    table = _find(section, dash_table.DataTable)[0]
+    by_practice = {r["Practice"]: r for r in table.data}
+    assert set(by_practice) == {"Practice A", "Practice B"}
+    assert by_practice["Practice A"]["Member Months"] == 1
+    assert by_practice["Practice A"]["Variance"] == pytest.approx(650.0)
+    assert by_practice["Practice B"]["Variance"] == pytest.approx(-250.0)
+    assert "Assigned members, PY2025, 2 member-months" in _caption(section)
+
+
+def test_year_filter_selects_the_projection_card(full_db):
+    latest = str(layout._render_aco_panel(None))
+    assert "2026Q2" in latest and "BENCH-T26" in latest
+    assert "2025Q4" not in latest and "2026Q1" not in latest
+    assert str(layout._render_aco_panel(2026)) == latest
+
+    prior = str(layout._render_aco_panel(2025))
+    assert "2025Q4" in prior and "BENCH-T25" in prior and "2026Q2" not in prior
+
+    missing = layout._render_aco_panel(2024)
+    assert _find(missing, dbc.Alert), "a year without a projection should show the alert"
+    assert "2024" in str(missing)
+
+
+def test_year_without_projection_leaves_the_comparison_empty(full_db):
+    kpis, section = layout._render_program_benchmark("flat", True, 2024)
+    values = _card_values(kpis)
+    assert values["Actual PMPM"] == "—" and values["Flat Benchmark PMPM"] == "—"
+    assert _find(section, dbc.Alert) and not _find(section, dash_table.DataTable)
+
+
+def test_controls_default_to_assigned_and_the_latest_projection_year(full_db):
+    page = layout.build_layout()
+    switches = [s for s in _find(page, dbc.Switch) if s.id == "mssp-benchmark-assigned-only"]
+    assert len(switches) == 1 and switches[0].value is True
+    years = [d for d in _find(page, dcc.Dropdown) if d.id == "mssp-benchmark-year"]
+    assert len(years) == 1
+    assert [o["value"] for o in years[0].options] == [2025, 2026]
+    assert years[0].value == 2026
+    assert years[0].clearable is False
+
+
+def test_year_dropdown_is_empty_without_the_aco_fact(no_benchmark_db):
+    page = layout.build_layout()
+    years = [d for d in _find(page, dcc.Dropdown) if d.id == "mssp-benchmark-year"]
+    assert len(years) == 1
+    assert years[0].options == [] and years[0].value is None
+    # The callbacks still answer with the alerts rather than raising.
+    assert _find(layout._render_aco_panel(None), dbc.Alert)
+    kpis, section = layout._render_program_benchmark("flat", True, None)
+    assert _find(kpis, dbc.Alert) and _find(section, dash_table.DataTable)
+
+
+def test_practice_tab_responds_to_both_controls(full_db):
+    # Practice C is entirely non-assigned: empty under the default toggle...
+    on = layout._render_practice("Practice C", "enrollment_type", True, 2026)
+    assert not _find(on, dash_table.DataTable)
+    assert _find(on, dbc.Alert)
+    assert _card_values(on)["Members"] == "0"
+    # ...and fully covered with it off.
+    off = layout._render_practice("Practice C", "enrollment_type", False, 2026)
+    table = _find(off, dash_table.DataTable)[0]
+    by_provider = {r["Provider"]: r for r in table.data}
+    assert by_provider["Dr Four"]["Benchmark PMPM"] == pytest.approx(600.0)
+    assert by_provider["Dr Four"]["Variance"] == pytest.approx(-50.0)
+    assert by_provider["Dr Four"]["Excluded MM"] == 0
+    assert "All members, PY2026, 6 member-months; 0 excluded" in _caption(off)
+    values = _card_values(off)
+    assert values["Members"] == "3" and values["PMPM"] == "$550.00"
+
+    # The year narrows the practice to its prior-year months.
+    prior = layout._render_practice("Practice B", "enrollment_type", True, 2025)
+    table = _find(prior, dash_table.DataTable)[0]
+    by_provider = {r["Provider"]: r for r in table.data}
+    assert set(by_provider) == {"Dr Two"}
+    assert by_provider["Dr Two"]["Benchmark PMPM"] == pytest.approx(700.0)
+    assert by_provider["Dr Two"]["Variance"] == pytest.approx(0.0)
+    # Dr Three's unresolved enrollment type is excluded in 2026 only.
+    current = layout._render_practice("Practice B", "enrollment_type", True, 2026)
+    by_provider = {r["Provider"]: r for r in _find(current, dash_table.DataTable)[0].data}
+    assert by_provider["Dr Three"]["Excluded MM"] == 2
+    assert "2 excluded for lacking the enrollment type rate" in _caption(current)
+
+
+def test_provider_tab_responds_to_both_controls(full_db):
+    on = _card_values(layout._render_provider("Dr Four", "flat", True, 2026))
+    assert on["Panel size"] == "0" and on["Benchmark PMPM (Flat)"] == "—"
+    off = _card_values(layout._render_provider("Dr Four", "flat", False, 2026))
+    assert off["Panel size"] == "3"
+    assert off["Benchmark PMPM (Flat)"] == "$1,000.00" and off["Variance"] == "-$450.00"
+    prior = _card_values(layout._render_provider("Dr One", "risk_adjusted", True, 2025))
+    assert prior["Benchmark PMPM (Risk-adjusted (uncapped))"] == "$1,650.00"
+    assert prior["Variance"] == "-$50.00"
+
+
+@pytest.mark.parametrize("rate_key", list(benchmark.RATES))
+@pytest.mark.parametrize("assigned_only", [True, False])
+@pytest.mark.parametrize("year", [2025, 2026])
+def test_every_rate_agrees_with_the_filtered_frame(all_joined, rate_key, assigned_only, year):
+    """Whatever the controls, the KPI row, the caption, the practice table and
+    the provider table are the rollup of the same filtered member-months."""
+    population = benchmark.Population(assigned_only, year)
+    frame = benchmark.filter_population(all_joined, population)
+    expected = benchmark.totals(frame, rate_key)
+    kpis, section = layout._render_program_benchmark(rate_key, assigned_only, year)
+    assert len(_find(kpis, dbc.Card)) == 5
+    values = _card_values(kpis)
+    assert values["Actual PMPM"] == layout._pmpm(expected["actual_pmpm"])
+    assert (
+        f"{population.describe()}, {int(expected['member_months']):,} member-months; "
+        f"{int(expected['excluded_member_months']):,} excluded"
+    ) in _caption(section)
+
+    table = _find(section, dash_table.DataTable)[0]
+    by_practice = benchmark.rollup(frame, PRACTICE, rate_key).set_index(PRACTICE)
+    assert {r["Practice"] for r in table.data} == set(by_practice.index)
+    for row in table.data:
+        want = by_practice.loc[row["Practice"]]
+        assert row["Excluded MM"] == want["excluded_member_months"]
+        if math.isnan(want["variance_pmpm"]):
+            assert row["Variance"] is None or math.isnan(row["Variance"])
+        else:
+            assert row["Variance"] == pytest.approx(want["variance_pmpm"], abs=0.01)
+
+    practice = by_practice.index[0]
+    out = layout._render_practice(practice, rate_key, assigned_only, year)
+    providers = {r["Provider"]: r for r in _find(out, dash_table.DataTable)[0].data}
+    want = benchmark.rollup(frame[frame[PRACTICE] == practice], PROVIDER, rate_key)
+    assert set(providers) == set(want[PROVIDER])
+    for _, w in want.iterrows():
+        assert providers[w[PROVIDER]]["Excluded MM"] == w["excluded_member_months"]

@@ -5,8 +5,12 @@ Patient, Quality Measure Detail, HCC Gaps Detail.
 
 The Program Performance and Practice pages also set actual PMPM against the
 MSSP benchmark from the two semantic layer benchmark facts (see
-`benchmark.py`). A rate selector above the tabs switches the benchmark
-between the flat, enrollment-type and risk-adjusted rates.
+`benchmark.py`). Three controls above the tabs govern that comparison and
+the ACO projections panel: the benchmark rate (flat, enrollment type,
+risk-adjusted), whether to compare over assigned members only (the default)
+or every member-month with a benchmark, and the performance year (default
+the latest with a projection). The original KPI row of the Program
+Performance page is not filtered by them.
 """
 
 from __future__ import annotations
@@ -83,6 +87,33 @@ def _has_benchmark() -> bool:
     return not _BENCH.empty
 
 
+def _selected_year(year) -> int | None:
+    """The year control's value as a performance year.
+
+    None — the dropdown is empty when no projection exists, and direct
+    callers may omit it — means the latest year with a projection, or every
+    year when there is none to pick.
+    """
+    if year is None:
+        year = benchmark.latest_projection_year(_ACO_QUARTERS.frame())
+    return int(year) if year is not None else None
+
+
+def _population(assigned_only, year) -> benchmark.Population:
+    """The two population controls as a `Population`."""
+    return benchmark.Population(bool(assigned_only), _selected_year(year))
+
+
+def _population_frame(population: benchmark.Population) -> pd.DataFrame:
+    """Member months with their benchmark rates, narrowed to the population.
+
+    Without the benchmark fact there is no assignment flag or year to filter
+    on, so the frame is returned whole and the plain PMPM view is unchanged.
+    """
+    df = _BENCH_MM.frame()
+    return benchmark.filter_population(df, population) if _has_benchmark() else df
+
+
 def _benchmark_missing_message() -> dbc.Alert:
     """Context-aware alert for the benchmark elements.
 
@@ -147,18 +178,19 @@ def _rollup(df: pd.DataFrame, group_col: str, name_col: str,
     return g[[*cols, "avg_risk"]]
 
 
-def _practice_rollup(rate_key: str | None = None) -> pd.DataFrame:
+def _practice_rollup(rate_key: str | None,
+                     population: benchmark.Population) -> pd.DataFrame:
     if _MM.empty:
         return pd.DataFrame()
-    return _rollup(_BENCH_MM.frame(), "payer_attributed_provider_practice", "practice",
-                   rate_key)
+    return _rollup(_population_frame(population), "payer_attributed_provider_practice",
+                   "practice", rate_key)
 
 
-def _provider_rollup(practice: str | None = None,
-                     rate_key: str | None = None) -> pd.DataFrame:
+def _provider_rollup(practice: str | None, rate_key: str | None,
+                     population: benchmark.Population) -> pd.DataFrame:
     if _MM.empty:
         return pd.DataFrame()
-    df = _BENCH_MM.frame()
+    df = _population_frame(population)
     if practice and practice != "(all)":
         df = df[df["payer_attributed_provider_practice"].fillna(benchmark.UNATTRIBUTED)
                 == practice]
@@ -205,21 +237,44 @@ def _pmpm_bar(rollup: pd.DataFrame, name_col: str, title: str, rate_label: str |
     return fig
 
 
+def _population_caption(rollup: pd.DataFrame, population: benchmark.Population,
+                        label: str) -> html.P:
+    """States the population in force so a screenshot is self-describing."""
+    member_months = int(rollup["member_months"].sum())
+    excluded = int(rollup["excluded_member_months"].sum())
+    return html.P(
+        f"{population.describe()}, {member_months:,} member-months; {excluded:,} "
+        f"excluded for lacking the {label.lower()} rate.",
+        className="small fw-semibold mt-2 mb-0",
+    )
+
+
 def _rollup_section(rollup: pd.DataFrame, name_col: str, table_title: str,
-                    bar_title: str, rate_key: str | None):
-    """Bar chart beside the rollup table, with the benchmark note when shown."""
-    if rollup.empty:
-        return no_data_message()
+                    bar_title: str, rate_key: str | None,
+                    population: benchmark.Population | None = None):
+    """Bar chart beside the rollup table, with the benchmark notes when shown.
+
+    `population` is the filter the rollup was built under when a rate is
+    shown; the caption names it. Without a rate the plain PMPM view has
+    neither caption nor note.
+    """
     label = benchmark.rate(rate_key).label if rate_key is not None else None
+    if rollup.empty:
+        if label is not None and population is not None:
+            return dbc.Alert(f"No member-months in this population ({population.describe()}).",
+                             color="info")
+        return no_data_message()
     note = []
     if label is not None:
-        note = [html.P(
+        if population is not None:
+            note.append(_population_caption(rollup, population, label))
+        note.append(html.P(
             f"Actual PMPM, Benchmark PMPM and Variance are over the member-months "
             f"that carry a {label.lower()} benchmark rate; Excluded MM counts those "
             f"without one. Variance is actual minus benchmark, so positive means "
             f"spending above the benchmark.",
             className="text-muted small mt-2 mb-0",
-        )]
+        ))
     return dbc.Row([
         dbc.Col(dcc.Graph(figure=_pmpm_bar(rollup, name_col, bar_title, label)), md=6),
         dbc.Col([html.H5(table_title), _rollup_table(rollup), *note], md=6),
@@ -312,13 +367,25 @@ def _aco_year_card(row: pd.Series) -> dbc.Card:
     return dbc.Card(parts, className="h-100")
 
 
-def _aco_panel():
-    """One card per performance year from the current-projection rows."""
+@callback(
+    Output("mssp-aco-panel", "children"),
+    Input("mssp-benchmark-year", "value"),
+)
+def _render_aco_panel(year=None):
+    """The selected year's card from the current-projection rows.
+
+    Every ACO in the fact gets a card for that year; a year with no current
+    projection shows an alert instead.
+    """
     if _ACO_QUARTERS.empty:
         return _benchmark_missing_message()
+    year = _selected_year(year)
     current = benchmark.current_projections(_ACO_QUARTERS.frame())
+    if year is not None:
+        years = pd.to_numeric(current["performance_year"], errors="coerce")
+        current = current[years == year]
     if current.empty:
-        return dbc.Alert("No current-projection rows in fact_benchmark_aco_quarter.",
+        return dbc.Alert(f"No current projection for PY{year} in fact_benchmark_aco_quarter.",
                          color="info")
     return dbc.Row([
         dbc.Col(_aco_year_card(row), md=6, xl=4, className="mb-3")
@@ -354,7 +421,7 @@ def _program_summary_tab() -> html.Div:
         html.Div(id="mssp-benchmark-kpis"),
         html.Div(id="mssp-practice-rollup"),
         html.H5("ACO benchmark projections", className="mt-3"),
-        _aco_panel(),
+        html.Div(id="mssp-aco-panel"),
     ], className="pt-3")
 
 
@@ -362,18 +429,24 @@ def _program_summary_tab() -> html.Div:
     Output("mssp-benchmark-kpis", "children"),
     Output("mssp-practice-rollup", "children"),
     Input("mssp-benchmark-rate", "value"),
+    Input("mssp-benchmark-assigned-only", "value"),
+    Input("mssp-benchmark-year", "value"),
 )
-def _render_program_benchmark(rate_key):
-    """Benchmark KPI row and the practice rollup, both on the selected rate.
+def _render_program_benchmark(rate_key, assigned_only=True, year=None):
+    """Benchmark KPI row and the practice rollup on the selected rate, over
+    the selected population.
 
     Without the benchmark fact the KPI row is the benchmark alert and the
     practice rollup is the plain PMPM view it always was.
     """
     has = _has_benchmark()
     rate_key = rate_key if has else None
-    kpis = _benchmark_kpis(_BENCH_MM.frame(), rate_key) if has else _benchmark_missing_message()
-    section = _rollup_section(_practice_rollup(rate_key), "practice", "Practice rollup",
-                              "PMPM by attributed practice", rate_key)
+    population = _population(assigned_only, year)
+    kpis = (_benchmark_kpis(_population_frame(population), rate_key) if has
+            else _benchmark_missing_message())
+    section = _rollup_section(_practice_rollup(rate_key, population), "practice",
+                              "Practice rollup", "PMPM by attributed practice",
+                              rate_key, population)
     return kpis, section
 
 
@@ -383,13 +456,22 @@ def _render_program_benchmark(rate_key):
     Output("mssp-practice-content", "children"),
     Input("mssp-practice-select", "value"),
     Input("mssp-benchmark-rate", "value"),
+    Input("mssp-benchmark-assigned-only", "value"),
+    Input("mssp-benchmark-year", "value"),
 )
-def _render_practice(practice, rate_key=None):
+def _render_practice(practice, rate_key=None, assigned_only=True, year=None):
+    """The practice's cards and provider rollup over the selected population.
+
+    With the benchmark fact present every figure on the page — members,
+    PMPM, risk, and the benchmark columns — covers the same member-months,
+    so the cards and the table describe one population.
+    """
     if not practice:
         return dbc.Alert("Pick a practice to see provider-level performance.",
                          color="info", className="mt-3")
 
-    frame = _BENCH_MM.frame()
+    population = _population(assigned_only, year)
+    frame = _population_frame(population)
     df = frame[frame["payer_attributed_provider_practice"].fillna(benchmark.UNATTRIBUTED)
                == practice]
     members_n = df["person_id"].nunique()
@@ -413,8 +495,8 @@ def _render_practice(practice, rate_key=None):
         kpi_card("Quality Meeting Target", _pct(quality_pct)),
     ]
 
-    section = _rollup_section(_provider_rollup(practice, rate_key), "provider",
-                              "Provider rollup", "PMPM by provider", rate_key)
+    section = _rollup_section(_provider_rollup(practice, rate_key, population), "provider",
+                              "Provider rollup", "PMPM by provider", rate_key, population)
     return [kpi_row(cards), section]
 
 
@@ -442,13 +524,16 @@ def _benchmark_cards(df: pd.DataFrame, rate_key: str | None) -> list[dbc.Card]:
     Output("mssp-provider-content", "children"),
     Input("mssp-provider-select", "value"),
     Input("mssp-benchmark-rate", "value"),
+    Input("mssp-benchmark-assigned-only", "value"),
+    Input("mssp-benchmark-year", "value"),
 )
-def _render_provider(provider, rate_key=None):
+def _render_provider(provider, rate_key=None, assigned_only=True, year=None):
+    """The provider's cards and panel over the selected population."""
     if not provider:
         return dbc.Alert("Pick a provider to see their patient panel and quality / HCC gaps.",
                          color="info", className="mt-3")
 
-    frame = _BENCH_MM.frame()
+    frame = _population_frame(_population(assigned_only, year))
     df = frame[frame["payer_attributed_provider"].fillna(benchmark.UNATTRIBUTED) == provider]
     panel = df["person_id"].unique()
     panel_members = _MEMBERS[_MEMBERS["person_id"].isin(panel)]
@@ -769,16 +854,38 @@ def build_layout() -> html.Div:
         html.Div(id="mssp-patient-content"),
     ], className="pt-3")
 
-    # The benchmark rate drives the Program Performance KPI row and the
-    # practice and provider rollups, so it sits above the tabs.
-    rate_selector = html.Div([
-        html.Label("Benchmark rate:", className="small text-muted me-2"),
-        dbc.RadioItems(
-            id="mssp-benchmark-rate",
-            options=[{"label": r.label, "value": r.key} for r in benchmark.RATES.values()],
-            value=benchmark.DEFAULT_RATE,
-            inline=True,
+    # The benchmark controls drive the Program Performance benchmark KPI row,
+    # the practice and provider rollups and the projections panel, so they
+    # sit above the tabs.
+    years = benchmark.projection_years(_ACO_QUARTERS.frame())
+    controls = html.Div([
+        html.Div([
+            html.Label("Benchmark rate:", className="small text-muted me-2"),
+            dbc.RadioItems(
+                id="mssp-benchmark-rate",
+                options=[{"label": r.label, "value": r.key} for r in benchmark.RATES.values()],
+                value=benchmark.DEFAULT_RATE,
+                inline=True,
+            ),
+        ], className="d-flex align-items-center flex-wrap me-4"),
+        dbc.Switch(
+            id="mssp-benchmark-assigned-only",
+            label="Assigned members only",
+            value=True,
+            className="small me-4 mb-0",
         ),
+        html.Div([
+            html.Label("Performance year:", className="small text-muted me-2"),
+            dcc.Dropdown(
+                id="mssp-benchmark-year",
+                options=[{"label": f"PY{y}", "value": y} for y in years],
+                value=years[-1] if years else None,
+                clearable=False,
+                disabled=not years,
+                placeholder="No projections",
+                style={"width": "130px"},
+            ),
+        ], className="d-flex align-items-center"),
     ], className="d-flex align-items-center flex-wrap mb-2")
 
     tabs = dbc.Tabs([
@@ -797,7 +904,7 @@ def build_layout() -> html.Div:
             "charts, quality measure gaps, and HCC suspect gaps for the "
             "attributed cohort."
         ),
-        body=html.Div([rate_selector, tabs]),
+        body=html.Div([controls, tabs]),
         tuva_tables=[
             "semantic_layer.fact_member_months",
             "semantic_layer.dim_member_months",
