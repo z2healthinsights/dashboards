@@ -164,7 +164,10 @@ def test_page_queries_run_against_a_v1_build(page, v1_db, caplog):
     caplog.set_level(logging.WARNING)
     for _module, name, fn in _loaders(page):
         frame = _call(fn)
-        assert not [c for c in frame.columns if RETIRED.fullmatch(str(c))], name
+        # The model browser shows whatever a table holds, deprecated columns
+        # included; every other loader must not bring one back.
+        if page != "semantic_layer":
+            assert not [c for c in frame.columns if RETIRED.fullmatch(str(c))], name
     failures = [r.getMessage() for r in caplog.records if "query failed" in r.getMessage()]
     assert not failures, failures
     layout = importlib.import_module(f"dashboards.{page}.layout")
