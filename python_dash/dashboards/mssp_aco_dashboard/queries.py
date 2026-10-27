@@ -24,20 +24,27 @@ def _safe(sql: str, columns: list[str]) -> pd.DataFrame:
 
 
 def load_member_months() -> pd.DataFrame:
-    """Member-month spend joined to provider attribution from dim_member_months."""
+    """Member-month spend joined to provider attribution from dim_member_months.
+
+    Semantic layer 1.0 keys member months on Core's `member_month_id` (person,
+    member, month, payer, plan and data source); `member_month_sk` is
+    deprecated because person and month alone are not unique.
+    """
     s = get_settings()
     sql = f"""
         SELECT
-            f.person_id, f.year_month, f.year_nbr, f.member_months,
+            f.member_month_id, f.person_id, f.data_source,
+            f.year_month, f.year_nbr, f.member_months,
             f.total_paid, f.medical_paid, f.pharmacy_paid,
             f.normalized_risk_score,
             d.payer, d.payer_attributed_provider,
             d.payer_attributed_provider_practice
         FROM {s.qualified(SCHEMA, 'fact_member_months')} f
         LEFT JOIN {s.qualified(SCHEMA, 'dim_member_months')} d
-            ON d.person_id = f.person_id AND d.year_month = f.year_month
+            ON d.member_month_id = f.member_month_id
     """
-    return _safe(sql, ["person_id", "year_month", "year_nbr", "member_months",
+    return _safe(sql, ["member_month_id", "person_id", "data_source",
+                       "year_month", "year_nbr", "member_months",
                        "total_paid", "medical_paid", "pharmacy_paid",
                        "normalized_risk_score",
                        "payer", "payer_attributed_provider",
@@ -49,7 +56,7 @@ def load_member_months() -> pd.DataFrame:
 # return empty frames and the dashboard shows its benchmark alert.
 
 MEMBER_MONTH_BENCHMARK_COLUMNS = [
-    "member_month_sk", "person_id", "year_month", "performance_year", "aco_id",
+    "person_id", "data_source", "year_month", "performance_year", "aco_id",
     "is_assigned", "enrollment_type", "risk_score", "risk_ratio",
     "by3_enrollment_type_risk_score",
     "flat_benchmark_pmpm", "enrollment_type_benchmark_pmpm",
@@ -74,11 +81,10 @@ BENCHMARK_ACO_QUARTER_COLUMNS = [
 def load_member_month_benchmark() -> pd.DataFrame:
     """Benchmark rates per member-month.
 
-    One row per member-month, one to one with `fact_member_months`. The fact
-    carries both the surrogate key `member_month_sk`
-    (`person_id || '|' || year_month`) and the natural key; the layout joins
-    on `(person_id, year_month)` so the existing member-month view never
-    depends on the surrogate key being present in `fact_member_months`.
+    Rates are per person, data source and month. The fact does not carry
+    Core's `member_month_id`, and its `member_month_sk` is the deprecated
+    person-and-month key, so the layout joins on
+    `(person_id, data_source, year_month)`; see `benchmark.merge_benchmark`.
     """
     s = get_settings()
     sql = f"""
