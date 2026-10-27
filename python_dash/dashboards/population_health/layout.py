@@ -393,13 +393,11 @@ def _pharmacy_tab() -> html.Div:
         return html.Div([no_data_message()], className="pt-3")
 
     total_paid = float(_PHARMACY["paid_amount"].sum())
-    if "generic_available_total_opportunity" in _PHARMACY.columns:
-        generic_opp = float(_PHARMACY["generic_available_total_opportunity"].fillna(0).sum())
-        generic_card = kpi_card("Generic Switching Opportunity", _money(generic_opp))
-    else:
-        # Semantic layer 1.0 retired the generic-opportunity fields, with no replacement.
-        generic_card = kpi_card("Generic Switching Opportunity", "—",
-                                sub="Not in semantic layer 1.0")
+    # Semantic layer 1.0 retired the generic-opportunity fields on
+    # fact_pharmacy_claims with no replacement; a 1.0 source for this card is
+    # backlog TUVA-136.
+    generic_card = kpi_card("Generic Switching Opportunity", "—",
+                            sub="Not in semantic layer 1.0")
     cards = kpi_row([
         kpi_card("Total Pharmacy Paid", _money(total_paid)),
         generic_card,

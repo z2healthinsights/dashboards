@@ -70,20 +70,22 @@ def load_encounters() -> pd.DataFrame:
 
 def load_admissions() -> pd.DataFrame:
     s = get_settings()
-    sql = f"SELECT * FROM {s.qualified(SCHEMA, 'fact_admissions')}"
-    return _safe(sql, ["encounter_id", "person_id", "admit_date",
-                       "discharge_date", "length_of_stay",
-                       "index_admission_flag", "had_readmission_flag",
-                       "readmit_30_flag", "drg_description",
-                       "attending_provider_name"])
+    columns = ["encounter_id", "person_id", "admit_date",
+               "discharge_date", "length_of_stay",
+               "index_admission_flag", "had_readmission_flag",
+               "readmit_30_flag", "drg_description",
+               "attending_provider_name"]
+    sql = f"SELECT {', '.join(columns)} FROM {s.qualified(SCHEMA, 'fact_admissions')}"
+    return _safe(sql, columns)
 
 
 def load_ed_visits() -> pd.DataFrame:
     s = get_settings()
-    sql = f"SELECT * FROM {s.qualified(SCHEMA, 'fact_ed_visits')}"
-    return _safe(sql, ["encounter_id", "person_id", "ed_classification_description",
-                       "avoidable", "avoidable_description", "paid_amount",
-                       "claim_count"])
+    columns = ["encounter_id", "person_id", "ed_classification_description",
+               "avoidable", "avoidable_description", "paid_amount",
+               "claim_count"]
+    sql = f"SELECT {', '.join(columns)} FROM {s.qualified(SCHEMA, 'fact_ed_visits')}"
+    return _safe(sql, columns)
 
 
 def load_pharmacy() -> pd.DataFrame:

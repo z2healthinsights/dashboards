@@ -33,7 +33,9 @@ _COLUMNS = LazyFrame(queries.load_columns)
 # fact_* tables join to the dim_* tables that share a key column. Member
 # months join on Core's `member_month_id` where a fact carries it; the
 # encounter-grain facts carry only the deprecated person-and-month
-# `member_month_sk`, so their member-month join is the composite natural key.
+# `member_month_sk`, so their member-month join is the composite natural key,
+# with the month derived from the encounter's start date. That join is many to
+# many where a person holds two coverage rows (payers or plans) in one month.
 # 1.0 retired dim_condition, fact_member_condition_bridge and
 # fact_expected_values. Each tuple is (fact_table, dim_table, join_key).
 _RELATIONSHIPS = [
@@ -43,16 +45,16 @@ _RELATIONSHIPS = [
     ("fact_encounters", "dim_member", "person_id"),
     ("fact_encounters", "dim_encounter_group", "encounter_group_sk"),
     ("fact_encounters", "dim_encounter_type", "encounter_type_sk"),
-    ("fact_encounters", "dim_member_months", "person_id + data_source + year_month"),
+    ("fact_encounters", "dim_member_months", "person_id + data_source + yyyymm(encounter_start_date)"),
     ("fact_claims", "dim_member", "person_id"),
     ("fact_claims", "dim_encounter_group", "encounter_group_sk"),
     ("fact_claims", "dim_encounter_type", "encounter_type_sk"),
     ("fact_claims", "dim_service_category", "service_category_sk"),
     ("fact_claims", "dim_member_months", "member_month_id"),
     ("fact_admissions", "dim_member", "person_id"),
-    ("fact_admissions", "dim_member_months", "person_id + data_source + admit month"),
+    ("fact_admissions", "dim_member_months", "person_id + data_source + yyyymm(admit_date)"),
     ("fact_ed_visits", "dim_member", "person_id"),
-    ("fact_ed_visits", "dim_member_months", "person_id + data_source + encounter month"),
+    ("fact_ed_visits", "dim_member_months", "person_id + data_source + yyyymm(encounter_start_date)"),
     ("fact_pharmacy_claims", "dim_member", "person_id"),
     ("fact_pharmacy_claims", "dim_member_months", "member_month_id"),
     ("fact_quality_measures", "dim_member", "person_id"),

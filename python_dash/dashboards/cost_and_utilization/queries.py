@@ -42,8 +42,9 @@ def _safe_query(sql: str, columns: list[str]) -> pd.DataFrame:
 
 def load_member_months() -> pd.DataFrame:
     s = get_settings()
-    sql = f"SELECT * FROM {s.qualified(SCHEMA, 'fact_member_months')}"
-    return _safe_query(sql, ["person_id", "year_month", "member_months", "total_paid"])
+    columns = ["person_id", "year_month", "member_months", "total_paid"]
+    sql = f"SELECT {', '.join(columns)} FROM {s.qualified(SCHEMA, 'fact_member_months')}"
+    return _safe_query(sql, columns)
 
 
 def load_encounters() -> pd.DataFrame:
@@ -114,20 +115,16 @@ def load_claims() -> pd.DataFrame:
 
 def load_admissions() -> pd.DataFrame:
     s = get_settings()
-    sql = f"SELECT * FROM {s.qualified(SCHEMA, 'fact_admissions')}"
-    return _safe_query(
-        sql,
-        [
-            "encounter_id", "person_id", "admit_date", "discharge_date",
-            "length_of_stay", "index_admission_flag", "readmit_30_flag",
-            "drg_description", "attending_provider_name",
-        ],
-    )
+    columns = [
+        "encounter_id", "person_id", "admit_date", "discharge_date",
+        "length_of_stay", "index_admission_flag", "readmit_30_flag",
+        "drg_description", "attending_provider_name",
+    ]
+    sql = f"SELECT {', '.join(columns)} FROM {s.qualified(SCHEMA, 'fact_admissions')}"
+    return _safe_query(sql, columns)
 
 
 def load_ed_visits() -> pd.DataFrame:
-    # Named columns: semantic layer 1.0 deprecates the `member_month_sk` the
-    # fact still carries, and the ED trend joins to encounters on encounter_id.
     s = get_settings()
     columns = [
         "encounter_id", "person_id",
