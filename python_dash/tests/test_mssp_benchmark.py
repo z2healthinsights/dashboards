@@ -57,11 +57,12 @@ def test_member_months_join_attribution_on_member_month_id(full_db):
     assert mm["payer_attributed_provider_practice"].notna().all()
 
 
-def test_member_month_benchmark_joins_one_to_one_on_person_source_month(full_db):
+def test_member_month_benchmark_joins_one_to_one_on_member_month_id(full_db):
     bench = queries.load_member_month_benchmark()
     assert len(bench) == N_MEMBER_MONTHS
     assert "member_month_sk" not in bench.columns
-    assert not bench.duplicated(benchmark.JOIN_KEYS).any()
+    assert benchmark.JOIN_KEYS == ["member_month_id"]
+    assert bench["member_month_id"].is_unique
     joined = benchmark.merge_benchmark(queries.load_member_months(), bench)
     assert len(joined) == N_MEMBER_MONTHS
     assert joined["flat_benchmark_pmpm"].notna().all()
@@ -73,8 +74,8 @@ def test_member_month_benchmark_joins_one_to_one_on_person_source_month(full_db)
 
 
 def test_split_coverage_member_months_do_not_fan_out(split_coverage_db):
-    # Two 1.0 member months (two plans) under P1 in 202601, and the benchmark
-    # fact repeating its rates on both: each member month is kept once.
+    # Two 1.0 member months (two plans) under P1 in 202601, each with its own
+    # benchmark row: each member month is kept once and counts as one MM.
     mm = queries.load_member_months()
     assert len(mm) == N_MEMBER_MONTHS + 1
     joined = benchmark.merge_benchmark(mm, queries.load_member_month_benchmark())

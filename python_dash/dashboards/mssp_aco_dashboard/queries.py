@@ -56,7 +56,8 @@ def load_member_months() -> pd.DataFrame:
 # return empty frames and the dashboard shows its benchmark alert.
 
 MEMBER_MONTH_BENCHMARK_COLUMNS = [
-    "person_id", "data_source", "year_month", "performance_year", "aco_id",
+    "member_month_id", "person_id", "data_source", "year_month",
+    "performance_year", "aco_id",
     "is_assigned", "enrollment_type", "risk_score", "risk_ratio",
     "by3_enrollment_type_risk_score",
     "flat_benchmark_pmpm", "enrollment_type_benchmark_pmpm",
@@ -81,10 +82,9 @@ BENCHMARK_ACO_QUARTER_COLUMNS = [
 def load_member_month_benchmark() -> pd.DataFrame:
     """Benchmark rates per member-month.
 
-    Rates are per person, data source and month. The fact does not carry
-    Core's `member_month_id`, and its `member_month_sk` is the deprecated
-    person-and-month key, so the layout joins on
-    `(person_id, data_source, year_month)`; see `benchmark.merge_benchmark`.
+    One row per 1.0 member month, joined to `fact_member_months` on
+    `member_month_id` (cms_mssp_connector carries it from TUVA-127); see
+    `benchmark.merge_benchmark`.
     """
     s = get_settings()
     sql = f"""

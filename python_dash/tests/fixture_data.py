@@ -111,7 +111,8 @@ def _member_month_frames() -> dict[str, pd.DataFrame]:
             capped = ra * y["cap"] if ra is not None else None
             by3 = score / ratio if score is not None and ratio is not None else None
             bench_rows.append({
-                "member_month_sk": sk, "person_id": pid, "data_source": "synthetic",
+                "member_month_id": mm_id, "member_month_sk": sk,
+                "person_id": pid, "data_source": "synthetic",
                 "patient_source_key": f"{pid}|synthetic", "year_month": ym,
                 "performance_year": year, "aco_id": "ACO-TEST", "is_assigned": assigned,
                 "enrollment_type": etype, "risk_score": score, "risk_ratio": ratio,
