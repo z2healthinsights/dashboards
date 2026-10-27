@@ -319,10 +319,8 @@ def build_layout() -> html.Div:
     return page_shell(
         title="Cost Drivers",
         subtitle=(
-            "Cost and utilization filtered by a CMS-HCC condition cohort. "
-            "Pick conditions to see PMPM and PKPY for members who carry all of them. "
-            "Tuva's chronic-condition groups were retired in semantic layer 1.0; "
-            "the cohort uses the CMS-HCC disease categories instead."
+            "Cost and utilization filtered by a CMS chronic-condition cohort. "
+            "Pick conditions to see PMPM and PKPY for members who carry all of them."
         ),
         body=body,
         tuva_tables=[

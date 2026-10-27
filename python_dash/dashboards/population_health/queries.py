@@ -42,7 +42,7 @@ def load_members() -> pd.DataFrame:
 
 
 def load_member_conditions() -> pd.DataFrame:
-    """CMS-HCC disease categories per member; see `tuva_dash.conditions`."""
+    """CMS chronic conditions per member; see `tuva_dash.conditions`."""
     return _safe(conditions.member_conditions_sql(get_settings()), conditions.COLUMNS)
 
 

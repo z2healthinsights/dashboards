@@ -147,36 +147,38 @@ def _member_month_frames() -> dict[str, pd.DataFrame]:
         "dim_member_months": dim_mm,
         "dim_member": members,
         "fact_member_month_benchmark": pd.DataFrame(bench_rows),
-        "fact_risk_factors": _risk_factor_frame(),
+        "chronic_conditions.cms_chronic_conditions_long": _chronic_conditions_frame(),
     }
 
 
-# CMS-HCC factors, the 1.0 source of member conditions (`tuva_dash.conditions`).
-# Only the 'Disease' factors are conditions; the demographic row is not.
+# CMS chronic conditions, the 1.0 source of member conditions
+# (`tuva_dash.conditions`). The long table has one row per evidence event, so
+# P1's diabetes appears on two encounters and must come back once.
 CONDITIONS = {
-    "P1": ["Diabetes with Chronic Complications", "Congestive Heart Failure"],
-    "P3": ["Diabetes with Chronic Complications"],
+    "P1": ["Diabetes", "Heart Failure and Non-Ischemic Heart Disease"],
+    "P3": ["Diabetes"],
 }
 
 
-def _risk_factor_frame() -> pd.DataFrame:
-    rows = [
-        {"person_id": pid, "payer": "medicare", "data_source": "synthetic",
-         "factor_type": "Disease", "risk_factor_description": condition,
-         "coefficient": 0.3, "model_version": "CMS-HCC-V28", "payment_year": 2026}
-        for pid, conditions in CONDITIONS.items()
-        for condition in conditions
-    ]
-    rows.append({"person_id": "P1", "payer": "medicare", "data_source": "synthetic",
-                 "factor_type": "Demographic", "risk_factor_description": "Female 70-74",
-                 "coefficient": 0.4, "model_version": "CMS-HCC-V28", "payment_year": 2026})
+def _chronic_conditions_frame() -> pd.DataFrame:
+    rows = []
+    for pid, conditions in CONDITIONS.items():
+        for condition in conditions:
+            events = 2 if (pid, condition) == ("P1", "Diabetes") else 1
+            for n in range(events):
+                rows.append({
+                    "person_id": pid, "encounter_id": f"E-{pid}-{condition[:4]}-{n}",
+                    "encounter_start_date": f"2026-01-0{n + 1}",
+                    "chronic_condition_type": "chronic", "condition_category": "synthetic",
+                    "condition": condition, "data_source": "synthetic",
+                })
     return pd.DataFrame(rows)
 
 
 # A second coverage row for P1 in 202601 (another plan): semantic layer 1.0
 # member months are per person, member, month, payer, plan and data source, so
 # two `member_month_id`s share one person and month. The benchmark fact, built
-# from the same member months, repeats its rates on both.
+# on the same member months, has a row for each.
 SPLIT_PERSON, SPLIT_MONTH = "P1", "202601"
 
 
@@ -249,10 +251,11 @@ def build_duckdb(path: Path, *, with_benchmark: bool, with_split_coverage: bool 
         _add_split_coverage(frames)
     con = duckdb.connect(str(path))
     try:
-        con.execute("CREATE SCHEMA semantic_layer")
         for name, frame in frames.items():
+            qualified = name if "." in name else f"semantic_layer.{name}"
+            con.execute(f"CREATE SCHEMA IF NOT EXISTS {qualified.split('.')[0]}")
             con.register("src", frame)
-            con.execute(f"CREATE TABLE semantic_layer.{name} AS SELECT * FROM src")
+            con.execute(f"CREATE TABLE {qualified} AS SELECT * FROM src")
             con.unregister("src")
     finally:
         con.close()

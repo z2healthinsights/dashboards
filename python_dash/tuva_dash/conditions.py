@@ -1,37 +1,36 @@
-"""Member condition cohorts on the Tuva semantic layer 1.0.
+"""Member chronic conditions on Tuva 1.0.
 
 Semantic layer 1.0 retired `dim_condition` and `fact_member_condition_bridge`
-together with Tuva's chronic-condition definitions, and ships no replacement
-grouping. The nearest person-level condition list it does ship is the CMS-HCC
-disease factors in `fact_risk_factors`, so the dashboards read conditions from
-there: one row per member and HCC disease category, across every payment year
-and model version in the table.
+(person x Tuva-defined chronic condition). Tuva 1.0 ships the CMS Chronic
+Conditions mart (`tuva-health/cms_chronic_conditions`) as a standalone
+package, and its `cms_chronic_conditions_long` holds one row per person,
+condition and evidence event. Deduplicated to person x condition it is the
+same shape as the retired bridge: every condition with claims evidence, under
+the CMS Chronic Conditions Warehouse definitions rather than Tuva's own.
 
-This is a change of meaning, not a rename. HCC categories cover only the
-conditions the CMS-HCC model pays for, after its hierarchies (a member with
-diabetes with complications does not also carry diabetes without), and only
-for members the model scored. Every page that shows these labels them as
-CMS-HCC conditions.
+The mart builds in the `chronic_conditions` schema, beside (not inside)
+`semantic_layer`, and only where the root project installs the package.
+Without it the query fails, the pages' safe loaders return an empty frame,
+and the condition views show their "no data" state.
 """
 
 from __future__ import annotations
 
 from tuva_dash.config import Settings
 
-SCHEMA = "semantic_layer"
-TABLE = "fact_risk_factors"
+SCHEMA = "chronic_conditions"
+TABLE = "cms_chronic_conditions_long"
 SOURCE_TABLE = f"{SCHEMA}.{TABLE}"
 COLUMNS = ["person_id", "condition"]
 
 # Short label for page headings and filter captions.
-LABEL = "CMS-HCC conditions"
+LABEL = "CMS chronic conditions"
 
 
 def member_conditions_sql(s: Settings) -> str:
-    """One row per member and CMS-HCC disease category, as `(person_id, condition)`."""
+    """One row per member and CMS chronic condition, as `(person_id, condition)`."""
     return f"""
-        SELECT DISTINCT person_id, risk_factor_description AS condition
+        SELECT DISTINCT person_id, condition
         FROM {s.qualified(SCHEMA, TABLE)}
-        WHERE factor_type = 'Disease'
-          AND risk_factor_description IS NOT NULL
+        WHERE condition IS NOT NULL
     """

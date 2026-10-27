@@ -2,8 +2,8 @@
 
 Mirrors the PBI dashboard which lets a user filter to a member cohort by
 condition and inspect cost/utilization at the encounter group + service
-category grain. On semantic layer 1.0 the conditions are CMS-HCC disease
-categories (see `tuva_dash.conditions`); Tuva's chronic conditions are retired.
+category grain. On Tuva 1.0 the conditions are the CMS chronic conditions
+(see `tuva_dash.conditions`).
 """
 
 from __future__ import annotations
@@ -90,7 +90,7 @@ def load_claims() -> pd.DataFrame:
 
 
 def load_member_conditions() -> pd.DataFrame:
-    """CMS-HCC disease categories per member; see `tuva_dash.conditions`."""
+    """CMS chronic conditions per member; see `tuva_dash.conditions`."""
     return _safe(conditions.member_conditions_sql(get_settings()), conditions.COLUMNS)
 
 

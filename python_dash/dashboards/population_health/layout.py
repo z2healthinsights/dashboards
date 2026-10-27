@@ -153,7 +153,7 @@ def _overview_tab() -> html.Div:
     fig_sex = px.pie(sex_pie, names="sex", values="members", title="Members by sex")
     fig_sex.update_layout(height=340)
 
-    # CMS-HCC conditions × age group pivot (Tuva chronic conditions retired in 1.0)
+    # CMS chronic conditions × age group pivot
     if not _CONDITIONS.empty:
         cc = _CONDITIONS.merge(_MEMBERS[["person_id", "age_group"]], on="person_id", how="left")
         pivot = (
@@ -542,7 +542,7 @@ def build_layout() -> html.Div:
     return page_shell(
         title="Population Health",
         subtitle=(
-            "Demographics, CMS-HCC conditions, inpatient utilization, "
+            "Demographics, chronic conditions, inpatient utilization, "
             "preventable events, pharmacy spend, and risk scores."
         ),
         body=body,
