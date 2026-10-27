@@ -14,6 +14,8 @@ import pandas as pd
 from dash import Input, Output, callback, dash_table, dcc, html
 
 from tuva_dash.components import kpi_card, kpi_row, no_data_message, page_shell
+from tuva_dash.conditions import LABEL as CONDITIONS_LABEL
+from tuva_dash.conditions import SOURCE_TABLE as CONDITIONS_TABLE
 from tuva_dash.lazy import LazyFrame
 
 from . import queries
@@ -265,7 +267,7 @@ def build_layout() -> html.Div:
         [
             dbc.Col(
                 [
-                    html.Label("Chronic conditions (members must have ALL):",
+                    html.Label(f"{CONDITIONS_LABEL} (members must have ALL):",
                                className="small text-muted"),
                     dcc.Dropdown(
                         id="cd-condition-filter",
@@ -317,8 +319,10 @@ def build_layout() -> html.Div:
     return page_shell(
         title="Cost Drivers",
         subtitle=(
-            "Cost and utilization filtered by chronic-condition cohort. "
-            "Pick conditions to see PMPM and PKPY for members who carry all of them."
+            "Cost and utilization filtered by a CMS-HCC condition cohort. "
+            "Pick conditions to see PMPM and PKPY for members who carry all of them. "
+            "Tuva's chronic-condition groups were retired in semantic layer 1.0; "
+            "the cohort uses the CMS-HCC disease categories instead."
         ),
         body=body,
         tuva_tables=[
@@ -326,8 +330,7 @@ def build_layout() -> html.Div:
             "semantic_layer.fact_claims",
             "semantic_layer.fact_encounters",
             "semantic_layer.fact_admissions",
-            "semantic_layer.fact_member_condition_bridge",
-            "semantic_layer.dim_condition",
+            CONDITIONS_TABLE,
             "semantic_layer.dim_service_category",
             "semantic_layer.dim_encounter_group",
             "semantic_layer.dim_encounter_type",

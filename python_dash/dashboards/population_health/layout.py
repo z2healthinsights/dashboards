@@ -12,6 +12,8 @@ import plotly.express as px
 from dash import dash_table, dcc, html
 
 from tuva_dash.components import kpi_card, kpi_row, no_data_message, page_shell
+from tuva_dash.conditions import LABEL as CONDITIONS_LABEL
+from tuva_dash.conditions import SOURCE_TABLE as CONDITIONS_TABLE
 from tuva_dash.lazy import LazyFrame
 
 from . import queries
@@ -151,7 +153,7 @@ def _overview_tab() -> html.Div:
     fig_sex = px.pie(sex_pie, names="sex", values="members", title="Members by sex")
     fig_sex.update_layout(height=340)
 
-    # Chronic conditions × age group pivot
+    # CMS-HCC conditions × age group pivot (Tuva chronic conditions retired in 1.0)
     if not _CONDITIONS.empty:
         cc = _CONDITIONS.merge(_MEMBERS[["person_id", "age_group"]], on="person_id", how="left")
         pivot = (
@@ -185,7 +187,7 @@ def _overview_tab() -> html.Div:
             dbc.Col(dcc.Graph(figure=fig_age), md=8),
             dbc.Col(dcc.Graph(figure=fig_sex), md=4),
         ], className="mb-3"),
-        html.H5("Chronic conditions by age group"),
+        html.H5(f"{CONDITIONS_LABEL} by age group"),
         cc_table,
         html.H5("Top members by total paid", className="mt-3"),
         dash_table.DataTable(
@@ -534,15 +536,14 @@ def build_layout() -> html.Div:
     return page_shell(
         title="Population Health",
         subtitle=(
-            "Demographics, chronic conditions, inpatient utilization, "
+            "Demographics, CMS-HCC conditions, inpatient utilization, "
             "preventable events, pharmacy spend, and risk scores."
         ),
         body=body,
         tuva_tables=[
             "semantic_layer.fact_member_months",
             "semantic_layer.dim_member",
-            "semantic_layer.fact_member_condition_bridge",
-            "semantic_layer.dim_condition",
+            CONDITIONS_TABLE,
             "semantic_layer.fact_encounters",
             "semantic_layer.fact_admissions",
             "semantic_layer.fact_ed_visits",

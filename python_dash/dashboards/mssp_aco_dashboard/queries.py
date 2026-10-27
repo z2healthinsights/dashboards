@@ -6,7 +6,7 @@ import logging
 
 import pandas as pd
 
-from tuva_dash import run_query
+from tuva_dash import conditions, run_query
 from tuva_dash.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -131,14 +131,8 @@ def load_members() -> pd.DataFrame:
 
 
 def load_member_conditions() -> pd.DataFrame:
-    s = get_settings()
-    sql = f"""
-        SELECT b.person_id, c.condition
-        FROM {s.qualified(SCHEMA, 'fact_member_condition_bridge')} b
-        LEFT JOIN {s.qualified(SCHEMA, 'dim_condition')} c
-            ON c.condition_sk = b.condition_sk
-    """
-    return _safe(sql, ["person_id", "condition"])
+    """CMS-HCC disease categories per member; see `tuva_dash.conditions`."""
+    return _safe(conditions.member_conditions_sql(get_settings()), conditions.COLUMNS)
 
 
 def load_hcc_gaps() -> pd.DataFrame:
