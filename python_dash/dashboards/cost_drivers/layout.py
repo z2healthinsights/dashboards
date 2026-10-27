@@ -1,7 +1,7 @@
 """Layout + callbacks for the Cost Drivers dashboard.
 
 PBI structure (3 pages):
-  - Summary: KPIs, Year + Chronic Conditions slicers, two pivots
+  - Summary: KPIs, Year + CMS chronic conditions slicers, two pivots
     (Utilization Metrics by Encounter, PMPM by Service Category)
   - Encounter Grain: row-level encounter table
   - Claim Line Grain: row-level claim line table

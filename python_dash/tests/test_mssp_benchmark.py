@@ -10,9 +10,11 @@ assigned members only, in the latest performance year with a projection
 
 from __future__ import annotations
 
+import logging
 import math
 
 import dash_bootstrap_components as dbc
+import pandas as pd
 import pytest
 from dash import dash_table, dcc, html
 
@@ -71,6 +73,19 @@ def test_member_month_benchmark_joins_one_to_one_on_member_month_id(full_db):
     assert p1_jan["risk_adjusted_benchmark_pmpm_capped"].item() == pytest.approx(1440.0)
     # P2 has no score and P4 no enrollment type: their risk-adjusted rate is NULL.
     assert joined["risk_adjusted_benchmark_pmpm_capped"].isna().sum() == 4
+
+
+def test_repeated_benchmark_key_is_read_once_and_logged(caplog):
+    mm = pd.DataFrame({"member_month_id": ["A", "B"], "total_paid": [100.0, 200.0]})
+    bench = pd.DataFrame({
+        "member_month_id": ["A", "A", "B"],
+        "flat_benchmark_pmpm": [1000.0, 9999.0, 1000.0],
+    })
+    with caplog.at_level(logging.WARNING, logger=benchmark.__name__):
+        merged = benchmark.merge_benchmark(mm, bench)
+    assert len(merged) == 2
+    assert merged.set_index("member_month_id").loc["A", "flat_benchmark_pmpm"] == 1000.0
+    assert "repeats member_month_id" in caplog.text
 
 
 def test_split_coverage_member_months_do_not_fan_out(split_coverage_db):
