@@ -393,10 +393,16 @@ def _pharmacy_tab() -> html.Div:
         return html.Div([no_data_message()], className="pt-3")
 
     total_paid = float(_PHARMACY["paid_amount"].sum())
-    generic_opp = float(_PHARMACY["generic_available_total_opportunity"].fillna(0).sum())
+    if "generic_available_total_opportunity" in _PHARMACY.columns:
+        generic_opp = float(_PHARMACY["generic_available_total_opportunity"].fillna(0).sum())
+        generic_card = kpi_card("Generic Switching Opportunity", _money(generic_opp))
+    else:
+        # Semantic layer 1.0 retired the generic-opportunity fields, with no replacement.
+        generic_card = kpi_card("Generic Switching Opportunity", "—",
+                                sub="Not in semantic layer 1.0")
     cards = kpi_row([
         kpi_card("Total Pharmacy Paid", _money(total_paid)),
-        kpi_card("Generic Switching Opportunity", _money(generic_opp)),
+        generic_card,
         kpi_card("Pharmacy Claims", f"{len(_PHARMACY):,}"),
     ])
 
@@ -549,7 +555,6 @@ def build_layout() -> html.Div:
             "semantic_layer.fact_ed_visits",
             "semantic_layer.fact_pharmacy_claims",
             "semantic_layer.fact_risk_scores",
-            "semantic_layer.fact_risk_factors",
-            "ahrq_measures.pqi_rate",
+            "ahrq_quality_indicators.pqi_rate",
         ],
     )

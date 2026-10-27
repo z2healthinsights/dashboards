@@ -12,7 +12,7 @@ from tuva_dash.config import get_settings
 log = logging.getLogger(__name__)
 
 SCHEMA = "semantic_layer"
-AHRQ_SCHEMA = "ahrq_measures"
+AHRQ_SCHEMA = "ahrq_quality_indicators"
 
 
 def _safe(sql: str, columns: list[str]) -> pd.DataFrame:
@@ -95,7 +95,6 @@ def load_pharmacy() -> pd.DataFrame:
         "dispensing_provider_name", "dispensing_date",
         "days_supply", "brand_name", "brand_vs_generic",
         "atc_1_name", "atc_2_name", "atc_3_name", "atc_4_name",
-        "generic_available", "generic_available_total_opportunity",
     ])
 
 

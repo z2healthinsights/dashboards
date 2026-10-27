@@ -958,7 +958,7 @@ def build_layout() -> html.Div:
             CONDITIONS_TABLE,
             "semantic_layer.fact_hcc_gaps",
             "semantic_layer.fact_encounters",
-            "ahrq_measures.pqi_rate",
-            "ahrq_measures.pqi_denom_long",
+            "ahrq_quality_indicators.pqi_rate",
+            "ahrq_quality_indicators.pqi_denom_long",
         ],
     )

@@ -12,7 +12,7 @@ from tuva_dash.config import get_settings
 log = logging.getLogger(__name__)
 
 SCHEMA = "semantic_layer"
-AHRQ_SCHEMA = "ahrq_measures"
+AHRQ_SCHEMA = "ahrq_quality_indicators"
 
 
 def _safe(sql: str, columns: list[str]) -> pd.DataFrame:
